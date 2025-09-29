@@ -1,0 +1,106 @@
+/* Reports.css */
+.report-container {
+  max-width: 600px;
+  margin: 40px auto;
+  padding: 32px 28px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.report-container h2 {
+  margin-bottom: 24px;
+  color: #2c3e50;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.report-form-row {
+  width: 100%;
+  display: flex;
+  gap: 18px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.report-form-col {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-label {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #34495e;
+  font-size: 1rem;
+}
+
+.report-select, .report-input {
+  padding: 8px 10px;
+  border: 1.5px solid #bfc9d1;
+  border-radius: 6px;
+  font-size: 1rem;
+  margin-bottom: 2px;
+  background: #f8fafc;
+  transition: border-color 0.2s;
+}
+
+.report-select:focus, .report-input:focus {
+  border-color: #007bff;
+  outline: none;
+}
+
+.report-download-btn {
+  padding: 12px 32px;
+  background: linear-gradient(90deg, #007bff 60%, #17a2b8 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 18px;
+  box-shadow: 0 2px 8px rgba(0,123,255,0.08);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.report-download-btn:hover {
+  background: linear-gradient(90deg, #0056b3 60%, #138496 100%);
+  box-shadow: 0 4px 16px rgba(0,123,255,0.15);
+}
+
+@media (max-width: 700px) {
+  .report-container {
+    padding: 16px 4vw;
+  }
+  .report-form-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+} 
+
+@media (max-width: 600px) {
+  .reports-container, .reports-container table {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  .app-container.sidebar-hidden .reports-container,
+  .app-container.sidebar-hidden .reports-container table {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+} 

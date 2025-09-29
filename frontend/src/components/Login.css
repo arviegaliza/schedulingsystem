@@ -1,0 +1,155 @@
+/* src/components/Login.css */
+
+body, html {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: Arial, sans-serif;
+  overflow: hidden;
+  background: linear-gradient(135deg, #007bff 0%, #17a2b8 100%);
+  color: #333;
+}
+
+#root {
+  height: 100%;
+}
+
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(135deg, #e0e7ff 0%, #f8fafc 100%);
+  padding: 24px;
+}
+
+html, body, .login-container {
+  overflow-y: hidden !important;
+}
+
+.login-form {
+  background: #fff;
+  border-radius: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.10);
+  padding: 24px 16px;
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-form label {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #1e293b;
+}
+
+.login-form input[type="text"],
+.login-form input[type="password"],
+.login-form input[type="email"] {
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 1rem;
+  background: #f1f5f9;
+  transition: border 0.2s;
+}
+.login-form input:focus {
+  border: 1.5px solid #6366f1;
+  outline: none;
+  background: #fff;
+}
+
+.login-form button {
+  background: linear-gradient(90deg, #6366f1 0%, #60a5fa 100%);
+  color: #fff;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  padding: 14px 0;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 8px;
+}
+.login-form button:hover {
+  background: linear-gradient(90deg, #4f46e5 0%, #2563eb 100%);
+}
+
+.login-form .error-message {
+  color: #ef4444;
+  background: #fef2f2;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.98rem;
+  margin-bottom: 8px;
+}
+
+.login-form .form-footer {
+  text-align: center;
+  font-size: 0.98rem;
+  color: #64748b;
+  margin-top: 12px;
+}
+
+@media (max-width: 600px) {
+  .login-form {
+    padding: 24px 8px;
+    max-width: 98vw;
+  }
+  .login-container {
+    padding: 8px;
+  }
+}
+
+/* Footer Text & Links */
+.form-footer,
+.forgot-password,
+.officer-login {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: #555;
+  user-select: none;
+}
+
+.link-button,
+.officer-link {
+  background: none;
+  border: none;
+  color: #007bff;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.3s ease;
+}
+
+.link-button:hover,
+.officer-link:hover {
+  color: #0056b3;
+}
+
+/* Error & Success Messages */
+.error, .success {
+  padding: 10px 15px;
+  margin-bottom: 18px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  user-select: none;
+  text-align: center;
+}
+
+.error {
+  background-color: #ffe5e5;
+  color: #d93025;
+  border: 1.5px solid #d93025;
+}
+
+.success {
+  background-color: #e6f4ea;
+  color: #188038;
+  border: 1.5px solid #188038;
+}
