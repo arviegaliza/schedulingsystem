@@ -1,35 +1,32 @@
-// server.js
-const express = require('express');
-const mysql = require('mysql2');
-const cors = require('cors');
-const https = require('http');
-const { Server } = require('socket.io');
-const cron = require('node-cron');
-const jwt = require('jsonwebtoken');
-require('dotenv').config();
-const nodemailer = require('nodemailer');
-const crypto = require('crypto');
-const ExcelJS = require('exceljs');
-const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const app = express();
-const server = https.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-const PORT = process.env.PORT || 8081;
-const SECRET_KEY = 'your-secret-key';
+import express from "express";
+import cors from "cors";
+import mysql from "mysql2";
+import dotenv from "dotenv";
+import fs from "fs";
+import jwt from "jsonwebtoken";
+import nodemailer from "nodemailer";
+import crypto from "crypto";
+import ExcelJS from "exceljs";
+import PDFDocument from "pdfkit";
+import http from "http";
+import { Server } from "socket.io";
+import cron from "node-cron";
 
+dotenv.config(); // ✅ Load .env before using process.env
+
+const app = express(); // ✅ define app first
 
 const options = {
   key: fs.readFileSync("ssl/server.key"),
   cert: fs.readFileSync("ssl/server.cert"),
 };
 
-console.log('EMAIL_USER:', process.env.EMAIL_USER);
-console.log('EMAIL_PASS:', process.env.EMAIL_PASS ? '***set***' : '***missing***');
-
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+console.log("EMAIL_USER:", process.env.EMAIL_USER);
+console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
 
 const pool = mysql.createPool({
   connectionLimit: 100,
@@ -41,12 +38,22 @@ const pool = mysql.createPool({
 });
 
 pool.getConnection((err, connection) => {
-  if (err) console.error('❌ DB connection failed:', err.message);
+  if (err) console.error("❌ DB connection failed:", err.message);
   else {
-    console.log('✅ Connected to MySQL database');
+    console.log("✅ Connected to MySQL database");
     connection.release();
   }
 });
+
+// ✅ create the server AFTER app is defined
+const server = http.createServer(app);
+
+// ✅ initialize socket.io after server is created
+const io = new Server(server, {
+  cors: { origin: "*" },
+});
+
+
 
 function safeJSONParse(input, fallback = []) {
   try {
@@ -847,11 +854,24 @@ app.get('/api/test-email', (req, res) => {
   });
 });
 
+app.get('/test-db', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW()');
+    res.json({ success: true, serverTime: result.rows[0] });
+  } catch (err) {
+    console.error('Database error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
 // Add a friendly root route
 app.get('/', (req, res) => {
   res.send('Backend API is running!');
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://sdoinschedulingsystem.loc:${PORT}`);
+const PORT = process.env.PORT || 8081;
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });
