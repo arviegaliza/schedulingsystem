@@ -26,7 +26,7 @@ function Login() {
     e.preventDefault();
     setError('');
     try {
-  const res = await axios.post('http://sdoinschedulingsystem.loc:8081/api/login', {
+  const res = await axios.post('https://schedulingsystem.onrender.com/login', {
         employee_number,
         password
       });
@@ -63,7 +63,7 @@ function Login() {
     }
 
     try {
-  const res = await axios.post('http://sdoinschedulingsystem.loc:8081/api/users', {
+  const res = await axios.post('https://schedulingsystem.onrender.com/api/users"', {
         employee_number,
         email,
         password,

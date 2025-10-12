@@ -31,6 +31,11 @@ app.use(express.urlencoded({ extended: true }));
 console.log("EMAIL_USER:", process.env.EMAIL_USER);
 console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
 
+
+app.use(cors({
+  origin: ["https://your-netlify-site.netlify.app"],
+  credentials: true,
+}));
 // PostgreSQL pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
