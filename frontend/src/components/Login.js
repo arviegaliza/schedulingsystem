@@ -30,6 +30,7 @@ function Login() {
         employee_number,
         password
       });
+      
 
       const user = res.data.user || res.data;
       if (!user || !user.type) {
