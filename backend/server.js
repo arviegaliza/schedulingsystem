@@ -1,21 +1,24 @@
 import express from "express";
 import cors from "cors";
-import mysql from "mysql2";
 import dotenv from "dotenv";
 import fs from "fs";
+import http from "http";
+import { Server } from "socket.io";
+import pkg from "pg"; // PostgreSQL
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
-import http from "http";
-import { Server } from "socket.io";
 import cron from "node-cron";
 
-dotenv.config(); // ✅ Load .env before using process.env
+dotenv.config(); // Load .env
 
-const app = express(); // ✅ define app first
+const { Pool } = pkg; // Import Pool for PostgreSQL
 
+const app = express();
+
+// HTTPS options
 const options = {
   key: fs.readFileSync("ssl/server.key"),
   cert: fs.readFileSync("ssl/server.cert"),
@@ -28,27 +31,21 @@ app.use(express.urlencoded({ extended: true }));
 console.log("EMAIL_USER:", process.env.EMAIL_USER);
 console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
 
-const pool = mysql.createPool({
-  connectionLimit: 100,
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : undefined,
+// PostgreSQL pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // required for Neon
 });
 
-pool.getConnection((err, connection) => {
-  if (err) console.error("❌ DB connection failed:", err.message);
-  else {
-    console.log("✅ Connected to MySQL database");
-    connection.release();
-  }
-});
+// Test connection
+pool.connect()
+  .then(() => console.log("✅ Connected to Neon PostgreSQL!"))
+  .catch(err => console.error("❌ DB connection failed:", err.message));
 
-// ✅ create the server AFTER app is defined
+// Create server
 const server = http.createServer(app);
 
-// ✅ initialize socket.io after server is created
+// Initialize Socket.io
 const io = new Server(server, {
   cors: { origin: "*" },
 });
