@@ -32,6 +32,7 @@
     "xlsx": "^0.18.5"
   },
   "scripts": {
+      
     "start": "set HOST=sdoinschedulingsystem.loc&&set PORT=3000&&react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
