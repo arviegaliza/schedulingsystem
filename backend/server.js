@@ -875,5 +875,5 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 8081;
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server is live on Render (port ${PORT})`);
 });
