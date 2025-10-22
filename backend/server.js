@@ -942,10 +942,10 @@ app.get('/api/test-email', (req, res) => {
 app.get('/test-db', async (req, res) => {
   try {
     const result = await pool.query('SELECT NOW()');
-    res.json({ success: true, serverTime: result.rows[0] });
+    res.json({ success: true, time: result.rows[0] });
   } catch (err) {
-    console.error('Database error:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error(err);
+    res.status(500).json({ success: false, message: 'DB connection failed' });
   }
 });
 
