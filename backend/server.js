@@ -181,7 +181,7 @@ cron.schedule('* * * * *', () => {
           });
         });
         // Mark event as notified after sending to all
-        pool.query('UPDATE schedule_events SET notified = 1 WHERE id = ?', [event.id]);
+        pool.query('UPDATE schedule_events SET notified = 1 WHERE id = $1', [event.id]);
       });
     });
   });
@@ -206,51 +206,64 @@ const transporter = nodemailer.createTransport({
     rejectUnauthorized: false
   }
 });
-
-// FORGOT PASSWORD
-app.post('/api/forgot-password', (req, res) => {
+// FORGOT PASSWORD - PostgreSQL version
+app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
 
-  if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
+  if (!email) 
+    return res.status(400).json({ success: false, message: 'Email is required' });
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const otpExpires = new Date(Date.now() + 10 * 60000); // 10 minutes from now
+  try {
+    // Generate OTP and expiration time
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = new Date(Date.now() + 10 * 60000); // 10 minutes from now
 
-  const findUserQuery = 'SELECT * FROM users WHERE email = ?';
-  pool.query(findUserQuery, [email], (err, results) => {
-    if (err || results.length === 0) {
+    // Find user
+    const findUserQuery = 'SELECT * FROM users WHERE email = $1';
+    const findResult = await pool.query(findUserQuery, [email]);
+
+    if (findResult.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const user = results[0];
-    const updateOtpQuery = 'UPDATE users SET otp_code = ?, otp_expires = ? WHERE id = ?';
+    const user = findResult.rows[0];
 
-    pool.query(updateOtpQuery, [otp, otpExpires, user.id], (err2) => {
-      if (err2) return res.status(500).json({ success: false, message: 'Failed to store OTP' });
+    // Update OTP in database
+    const updateOtpQuery = `
+      UPDATE users 
+      SET otp_code = $1, otp_expires = $2
+      WHERE id = $3
+    `;
+    await pool.query(updateOtpQuery, [otp, otpExpires, user.id]);
 
-      const mailOptions = {
-        from: 'arbgaliza@gmail.com',
-        to: user.email,
-        subject: 'Password Reset OTP',
-        text: `Your OTP code is ${otp}. It will expire in 10 minutes.`
-      };
+    // Send OTP email
+    const mailOptions = {
+      from: 'arbgaliza@gmail.com',
+      to: user.email,
+      subject: 'Password Reset OTP',
+      text: `Your OTP code is ${otp}. It will expire in 10 minutes.`
+    };
 
-      transporter.sendMail(mailOptions, (err3) => {
-        if (err3) {
-          console.error('Failed to send OTP:', err3);
-          return res.status(500).json({ success: false, message: 'Failed to send OTP' });
-        }
-        res.json({ success: true, message: 'OTP sent to your email' });
-      });
+    transporter.sendMail(mailOptions, (err) => {
+      if (err) {
+        console.error('Failed to send OTP:', err);
+        return res.status(500).json({ success: false, message: 'Failed to send OTP' });
+      }
+
+      res.json({ success: true, message: 'OTP sent to your email' });
     });
-  });
+
+  } catch (err) {
+    console.error('Error in forgot-password:', err);
+    res.status(500).json({ success: false, message: 'Database error' });
+  }
 });
 
 // VERIFY OTP
 app.post('/api/verify-otp', (req, res) => {
   const { email, otp_code } = req.body;
 
-  const query = 'SELECT * FROM users WHERE email = ? AND otp_code = ? AND otp_expires > NOW()';
+  const query = 'SELECT * FROM users WHERE email = $1 AND otp_code = $2 AND otp_expires > NOW()';
   pool.query(query, [email, otp_code], (err, results) => {
     if (err || results.length === 0) {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
@@ -258,38 +271,62 @@ app.post('/api/verify-otp', (req, res) => {
     res.json({ success: true, message: 'OTP verified' });
   });
 });
-
-// RESET PASSWORD
-app.post('/api/reset-password', (req, res) => {
+// RESET PASSWORD - PostgreSQL version
+app.post('/api/reset-password', async (req, res) => {
   const { email, otp_code, new_password } = req.body;
 
-  const findQuery = 'SELECT * FROM users WHERE email = ? AND otp_code = ? AND otp_expires > NOW()';
-  pool.query(findQuery, [email, otp_code], (err, results) => {
-    if (err || results.length === 0) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
+  if (!email || !otp_code || !new_password) {
+    return res.status(400).json({ success: false, message: 'All fields are required.' });
+  }
+
+  try {
+    // Find user with valid OTP
+    const findQuery = `
+      SELECT * FROM users 
+      WHERE email = $1
+        AND otp_code = $2
+        AND otp_expires > NOW()
+    `;
+    const findResult = await pool.query(findQuery, [email, otp_code]);
+
+    if (findResult.rows.length === 0) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired OTP.' });
     }
 
-    const updateQuery = 'UPDATE users SET password = ?, otp_code = NULL, otp_expires = NULL WHERE email = ?';
-    pool.query(updateQuery, [new_password, email], (err2) => {
-      if (err2) return res.status(500).json({ success: false, message: 'Failed to reset password' });
+    // Update password and clear OTP
+    const updateQuery = `
+      UPDATE users 
+      SET password = $1, otp_code = NULL, otp_expires = NULL
+      WHERE email = $2
+    `;
+    await pool.query(updateQuery, [new_password, email]);
 
-      const mailOptions = {
-        from: 'arbgaliza@gmail.com',
-        to: results[0].email,
-        subject: 'Password Changed',
-        text: `Your password has been changed successfully.`
-      };
+    // Send email notification
+    const mailOptions = {
+      from: 'arbgaliza@gmail.com',
+      to: findResult.rows[0].email,
+      subject: 'Password Changed',
+      text: `Hello ${findResult.rows[0].email},\n\nYour password has been successfully changed.\nIf you did not request this change, please contact support immediately.`
+    };
 
-      transporter.sendMail(mailOptions, (err3) => {
-        if (err3) {
-          console.error('Failed to send password change notification:', err3);
-          return res.status(500).json({ success: false, message: 'Password updated, but failed to notify via email.' });
-        }
-        res.json({ success: true, message: 'Password changed and email notification sent.' });
-      });
+    transporter.sendMail(mailOptions, (err) => {
+      if (err) {
+        console.error('Failed to send password change notification:', err);
+        return res.status(500).json({
+          success: true,
+          message: 'Password updated, but failed to send email notification.'
+        });
+      }
+
+      res.json({ success: true, message: 'Password changed and email notification sent.' });
     });
-  });
+
+  } catch (err) {
+    console.error('Error resetting password:', err);
+    res.status(500).json({ success: false, message: 'Database error.' });
+  }
 });
+
 
 // Categories
 app.get('/api/categories', (req, res) => {
@@ -309,7 +346,7 @@ app.get('/api/department', (req, res) => {
     res.json(allDepartments.map(department => ({ department })));
   });
 });
-app.post('/api/categories', (req, res) => {
+app.post('/api/categories', async (req, res) => {
   const { idnumber, office, email, department } = req.body;
   const userType = req.query.userType || 'Administrator';
 
@@ -317,7 +354,7 @@ app.post('/api/categories', (req, res) => {
   console.log('userType:', userType, 'department:', department);
   console.log('Comparison:', userType.trim().toLowerCase() === department.trim().toLowerCase());
 
-  // Only allow non-admins to add to their own department (case-insensitive, trimmed)
+  // Restrict non-admins from adding to other departments
   if (
     userType !== 'Administrator' &&
     userType.trim().toLowerCase() !== department.trim().toLowerCase()
@@ -325,58 +362,87 @@ app.post('/api/categories', (req, res) => {
     return res.status(403).json({ error: 'You can only add categories for your own department.' });
   }
 
+  // Validate required fields
   if (!idnumber || !office || !email || !department) {
     return res.status(400).json({ error: 'All fields are required, including ID number.' });
   }
 
-  const sql = `INSERT INTO categories (idnumber, office, email, department) VALUES (?, ?, ?, ?)`;
-  pool.query(sql, [idnumber, office, email, department], (err) => {
-    if (err) {
-      console.error('Insert Error:', err);
-      return res.status(500).json({ error: 'Insert failed. Possibly duplicate ID number.' });
-    }
-    res.status(201).json({ message: 'Category added' });
-  });
+  try {
+    const sql = `INSERT INTO categories (idnumber, office, email, department) VALUES ($1, $2, $3, $4)`;
+    await pool.query(sql, [idnumber, office, email, department]);
+    res.status(201).json({ message: 'Category added successfully' });
+  } catch (err) {
+    console.error('Insert Error:', err);
+    res.status(500).json({ error: 'Insert failed. Possibly duplicate ID number.' });
+  }
 });
 
-app.put('/api/categories/:id', (req, res) => {
+
+app.put('/api/categories/:id', async (req, res) => {
   const { office, email, department } = req.body;
   const userType = req.query.userType || 'Administrator';
+  const id = req.params.id;
 
-  pool.query('SELECT department FROM categories WHERE id = ?', [req.params.id], (err, results) => {
-    if (err || results.length === 0) return res.status(404).json({ error: 'Category not found' });
-    const catDept = results[0].department;
+  try {
+    // 1️⃣ Check if the category exists
+    const result = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    const catDept = result.rows[0].department;
+
+    // 2️⃣ Restrict based on department (if not admin)
     if (
       userType !== 'Administrator' &&
       userType.trim().toLowerCase() !== catDept.trim().toLowerCase()
     ) {
       return res.status(403).json({ error: 'You can only edit categories for your own department.' });
     }
-    const sql = `UPDATE categories SET office = ?, email = ?, department = ? WHERE id = ?`;
-    pool.query(sql, [office, email, department, req.params.id], (err) => {
-      if (err) return res.status(500).json({ error: 'Update failed' });
-      res.json({ message: 'Category updated' });
-    });
-  });
+
+    // 3️⃣ Perform the update
+    const sql = `UPDATE categories SET office = $1, email = $2, department = $3 WHERE id = $4`;
+    await pool.query(sql, [office, email, department, id]);
+
+    res.json({ message: 'Category updated successfully' });
+  } catch (err) {
+    console.error('Error updating category:', err);
+    res.status(500).json({ error: 'Update failed' });
+  }
 });
 
-app.delete('/api/categories/:id', (req, res) => {
+
+app.delete('/api/categories/:id', async (req, res) => {
   const userType = req.query.userType || 'Administrator';
-  pool.query('SELECT department FROM categories WHERE id = ?', [req.params.id], (err, results) => {
-    if (err || results.length === 0) return res.status(404).json({ error: 'Category not found' });
-    const catDept = results[0].department;
+  const id = req.params.id;
+
+  try {
+    // 1️⃣ Check if category exists
+    const result = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    const catDept = result.rows[0].department;
+
+    // 2️⃣ Department restriction
     if (
       userType !== 'Administrator' &&
       userType.trim().toLowerCase() !== catDept.trim().toLowerCase()
     ) {
       return res.status(403).json({ error: 'You can only delete categories for your own department.' });
     }
-    pool.query('DELETE FROM categories WHERE id = ?', [req.params.id], (err) => {
-      if (err) return res.status(500).json({ error: 'Delete failed' });
-      res.json({ message: 'Category deleted' });
-    });
-  });
+
+    // 3️⃣ Delete category
+    await pool.query('DELETE FROM categories WHERE id = $1', [id]);
+
+    res.json({ message: 'Category deleted' });
+  } catch (err) {
+    console.error('Error deleting category:', err);
+    res.status(500).json({ error: 'Delete failed' });
+  }
 });
+
 
 // GET all events
 app.get('/api/events', (req, res) => {
@@ -413,8 +479,8 @@ app.post('/api/events', (req, res) => {
   const conflictQuery = `
     SELECT * FROM schedule_events
     WHERE NOT (
-      CONCAT(end_date, ' ', end_time) <= ? OR
-      CONCAT(start_date, ' ', start_time) >= ?
+      CONCAT(end_date, ' ', end_time) <= $1 OR
+      CONCAT(start_date, ' ', start_time) >= $2
     )
   `;
   const params = [start_date + ' ' + start_time, end_date + ' ' + end_time];
@@ -455,9 +521,9 @@ app.put('/api/events/:id', (req, res) => {
   const conflictQuery = `
     SELECT * FROM schedule_events
     WHERE NOT (
-      CONCAT(end_date, ' ', end_time) <= ? OR
-      CONCAT(start_date, ' ', start_time) >= ?
-    ) AND id != ?
+      CONCAT(end_date, ' ', end_time) <= $1 OR
+      CONCAT(start_date, ' ', start_time) >= $2
+    ) AND id != $3
   `;
   const params = [start_date + ' ' + start_time, end_date + ' ' + end_time, req.params.id];
 
@@ -472,7 +538,20 @@ app.put('/api/events/:id', (req, res) => {
       return res.status(409).json({ error: 'Conflict: A selected office is already booked during the selected date & time range.' });
     }
     // ... proceed with update as before ...
-    const sql = `UPDATE schedule_events SET program = ?, start_date = ?, start_time = ?, end_date = ?, end_time = ?, \n               purpose = ?, participants = ?, department = ?, status = 'upcoming' WHERE id = ?`;
+    const sql = `
+  UPDATE schedule_events
+  SET program = $1,
+      start_date = $2,
+      start_time = $3,
+      end_date = $4,
+      end_time = $5,
+      purpose = $6,
+      participants = $7,
+      department = $8,
+      status = 'upcoming'
+  WHERE id = $9
+`;
+
     pool.query(sql, [
       program, start_date, start_time, end_date, end_time, purpose,
       JSON.stringify(participants), JSON.stringify(department), req.params.id
@@ -554,7 +633,7 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
       // start = month (1-12), end = year (e.g., 2025)
       events = await new Promise((resolve, reject) => {
         pool.query(
-          `SELECT * FROM schedule_events WHERE 1=1${getDepartmentFilter(department, userType, 'events')} AND MONTH(start_date) = ? AND YEAR(start_date) = ?`,
+          `SELECT * FROM schedule_events WHERE 1=1${getDepartmentFilter(department, userType, 'events')} AND MONTH(start_date) = $1 AND YEAR(start_date) = $2`,
           [start, end],
           (err, results) => (err ? reject(err) : resolve(results))
         );
@@ -698,7 +777,7 @@ app.post('/api/users', (req, res) => {
   // Restrict only one user for these types
   const fixedTypes = ['Administrator', 'OSDS', 'SGOD', 'CID'];
   if (fixedTypes.includes(type)) {
-    pool.query('SELECT id FROM users WHERE type = ?', [type], (err, results) => {
+    pool.query('SELECT id FROM users WHERE type = $1', [type], (err, results) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
       if (results.length > 0) {
         return res.status(409).json({ error: `A user with type ${type} already exists.` });
@@ -712,7 +791,7 @@ app.post('/api/users', (req, res) => {
           if (results.length > 0) {
             return res.status(409).json({ error: 'Employee number already exists.' });
           }
-          const sql = 'INSERT INTO users (employee_number, email, password, type) VALUES (?, ?, ?, ?)';
+          const sql = 'INSERT INTO users (employee_number, email, password, type) VALUES ($1, $2, $3, $4)';
           pool.query(sql, [employee_number, email, password, type], (err, result) => {
             if (err) return res.status(500).json({ error: 'Insert failed.' });
             res.status(201).json({ success: true, id: result.insertId });
@@ -725,14 +804,14 @@ app.post('/api/users', (req, res) => {
 
   // For other types, only check employee_number uniqueness
   pool.query(
-    'SELECT id FROM users WHERE employee_number = ?',
+    'SELECT id FROM users WHERE employee_number = $1',
     [employee_number],
     (err, results) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
       if (results.length > 0) {
         return res.status(409).json({ error: 'Employee number already exists.' });
       }
-      const sql = 'INSERT INTO users (employee_number, email, password, type) VALUES (?, ?, ?, ?)';
+      const sql = 'INSERT INTO users (employee_number, email, password, type) VALUES ($1, $2, $3, $4)';
       pool.query(sql, [employee_number, email, password, type], (err, result) => {
         if (err) return res.status(500).json({ error: 'Insert failed.' });
         res.status(201).json({ success: true, id: result.insertId });
@@ -753,21 +832,25 @@ app.put('/api/users/:id', (req, res) => {
     return res.status(400).json({ error: 'Employee number must be exactly 7 digits.' });
   }
 
-  const checkSql = 'SELECT id FROM users WHERE employee_number = ? AND id != ?';
+  const checkSql = 'SELECT id FROM users WHERE employee_number = $1 AND id != $2';
   pool.query(checkSql, [employee_number, id], (err, results) => {
     if (err) return res.status(500).json({ error: 'Database error during validation.' });
     if (results.length > 0) {
       return res.status(409).json({ error: 'Employee number already in use by another user.' });
     }
 
-    let sql, params;
-    if (password) {
-      sql = 'UPDATE users SET employee_number = ?, email = ?, password = ?, type = ? WHERE id = ?';
-      params = [employee_number, email, password, type, id];
-    } else {
-      sql = 'UPDATE users SET employee_number = ?, email = ?, type = ? WHERE id = ?';
-      params = [employee_number, email, type, id];
-    }
+ let sql, params;
+
+if (password) {
+  // Update with password
+  sql = 'UPDATE users SET employee_number = $1, email = $2, password = $3, type = $4 WHERE id = $5';
+  params = [employee_number, email, password, type, id];
+} else {
+  // Update without password
+  sql = 'UPDATE users SET employee_number = $1, email = $2, type = $3 WHERE id = $4';
+  params = [employee_number, email, type, id];
+}
+
 
     pool.query(sql, params, (err, result) => {
       if (err) return res.status(500).json({ error: 'Update failed.' });
@@ -779,7 +862,7 @@ app.put('/api/users/:id', (req, res) => {
 
 app.delete('/api/users/:id', (req, res) => {
   const { id } = req.params;
-  pool.query('DELETE FROM users WHERE id = ?', [id], (err, result) => {
+  pool.query('DELETE FROM users WHERE id = $1', [id], (err, result) => {
     if (err) return res.status(500).json({ error: 'Delete failed.' });
     if (result.affectedRows === 0) return res.status(404).json({ error: 'User not found.' });
     res.json({ success: true });
@@ -794,7 +877,7 @@ app.post('/api/login', (req, res) => {
   }
 
   pool.query(
-    'SELECT * FROM users WHERE employee_number = ? AND password = ?',
+    'SELECT * FROM users WHERE employee_number = $1 AND password = ?',
     [employee_number, password],
     (err, results) => {
       if (err) return res.status(500).json({ error: 'Database error' });
@@ -821,7 +904,7 @@ app.post('/api/login1', (req, res) => {
     return res.status(400).json({ success: false, message: 'ID number is required' });
   }
 
-  const query = 'SELECT * FROM categories WHERE idnumber = ? LIMIT 1';
+  const query = 'SELECT * FROM categories WHERE idnumber = $1 LIMIT 1';
   pool.query(query, [idnumber], (err, results) => {
     if (err) {
       console.error('Login1 Error:', err);
