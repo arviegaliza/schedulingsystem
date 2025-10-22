@@ -22,7 +22,9 @@ function getRandomQuote() {
   return QUOTES[Math.floor(Math.random() * QUOTES.length)];
 }
 
+
 function Home() {
+  const navigate = useNavigate(); // ⚡ define navigate here
   const [events, setEvents] = useState([]);
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
