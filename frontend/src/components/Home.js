@@ -30,27 +30,31 @@ function Home() {
   const [currentEventIdx, setCurrentEventIdx] = useState(0);
   const [fadeIn, setFadeIn] = useState(true);
   const [quote, setQuote] = useState(getRandomQuote());
-  const navigate = useNavigate();
+
+  const BASE_URL = 'https://schedulingsystem-1.onrender.com'; // Render backend
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [eventsRes, usersRes, deptsRes] = await Promise.all([
-          axios.get('http://sdoinschedulingsystem.loc:8081/api/events'),
-          axios.get('http://sdoinschedulingsystem.loc:8081/api/users'),
-          axios.get('http://sdoinschedulingsystem.loc:8081/api/department'),
+          axios.get(`${BASE_URL}/api/events`),
+          axios.get(`${BASE_URL}/api/users`),
+          axios.get(`${BASE_URL}/api/department`),
         ]);
+
         setEvents(eventsRes.data);
         setUsers(usersRes.data);
         setDepartments(deptsRes.data.map(d => d.department));
       } catch (err) {
-        // handle error
+        console.error('Failed to fetch data:', err);
       } finally {
         setLoading(false);
       }
     };
+
     fetchData();
   }, []);
+
 
   useSocket(() => {
     // You can trigger a data refresh here if needed

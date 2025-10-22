@@ -26,7 +26,7 @@ function Login() {
     e.preventDefault();
     setError('');
     try {
-  const res = await axios.post('https://schedulingsystem.onrender.com/login', {
+  const res = await axios.post('https://schedulingsystem-1.onrender.com/login', {
         employee_number,
         password
       });
@@ -64,7 +64,7 @@ function Login() {
     }
 
     try {
-  const res = await axios.post('https://schedulingsystem.onrender.com/api/users', {
+  const res = await axios.post('https://schedulingsystem-1.onrender.com/api/users', {
         employee_number,
         email,
         password,
@@ -97,7 +97,7 @@ function Login() {
     }
 
     try {
-      const res = await axios.post('https://schedulingsystem.onrender.com/api/forgot-password', { email });
+      const res = await axios.post('https://schedulingsystem-1.onrender.com/api/forgot-password', { email });
       if (res.data.success) {
         setSuccess('OTP sent to your email.');
         setStep(2);
@@ -115,7 +115,7 @@ function Login() {
     setSuccess('');
 
     try {
-  const res = await axios.post('https://schedulingsystem.onrender.com/api/verify-otp', { email, otp_code: otp });
+  const res = await axios.post('https://schedulingsystem-1.onrender.com/api/verify-otp', { email, otp_code: otp });
       if (res.data.success) {
         setSuccess('OTP verified. Set your new password.');
         setStep(3);
@@ -138,7 +138,7 @@ function Login() {
     }
 
     try {
-  const res = await axios.post('https://schedulingsystem.onrender.com/api/reset-password', {
+  const res = await axios.post('https://schedulingsystem.onrender-1.com/api/reset-password', {
         email,
         otp_code: otp,
         new_password: password

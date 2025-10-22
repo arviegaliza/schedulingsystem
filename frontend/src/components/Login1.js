@@ -14,7 +14,7 @@ function Login1() {
     setError('');
 
     try {
-  const res = await axios.post('http://sdoinschedulingsystem.loc:8081/api/login1', { idnumber });
+  const res = await axios.post('http://sdoinschedulingsystem-1.loc:8081/api/login1', { idnumber });
 
       if (!res.data.success) {
         setError('Login failed: ' + res.data.message);
