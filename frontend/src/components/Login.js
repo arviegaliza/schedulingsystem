@@ -26,10 +26,11 @@ function Login() {
     e.preventDefault();
     setError('');
     try {
-  const res = await axios.post('https://schedulingsystem-1.onrender.com/login', {
-        employee_number,
-        password
-      });
+const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/login`, {
+  employee_number,
+  password
+});
+
       
 
       const user = res.data.user || res.data;
@@ -64,12 +65,13 @@ function Login() {
     }
 
     try {
-  const res = await axios.post('https://schedulingsystem-1.onrender.com/api/users', {
-        employee_number,
-        email,
-        password,
-        type
-      });
+const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
+  employee_number,
+  email,
+  password,
+  type
+});
+
 
       if (res.data.success) {
         setSuccess('Registration successful! You can now login.');
@@ -96,35 +98,41 @@ function Login() {
       return;
     }
 
-    try {
-      const res = await axios.post('https://schedulingsystem-1.onrender.com/api/forgot-password', { email });
-      if (res.data.success) {
-        setSuccess('OTP sent to your email.');
-        setStep(2);
-      } else {
-        setError(res.data.message || 'Failed to send OTP.');
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Server error.');
-    }
-  };
-
+  try {
+  const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/forgot-password`, { email });
+  if (res.data.success) {
+    setSuccess('OTP sent to your email.');
+    setStep(2);
+  } else {
+    setError(res.data.message || 'Failed to send OTP.');
+  }
+} catch (err) {
+  setError(err.response?.data?.message || 'Server error.');
+}
+};
   const handleForgotStep2 = async (e) => {
     e.preventDefault();
     setError('');
     setSuccess('');
 
     try {
-  const res = await axios.post('https://schedulingsystem-1.onrender.com/api/verify-otp', { email, otp_code: otp });
-      if (res.data.success) {
-        setSuccess('OTP verified. Set your new password.');
-        setStep(3);
-      } else {
-        setError(res.data.message || 'OTP verification failed.');
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Server error.');
-    }
+  console.log("Verifying OTP using:", `${process.env.REACT_APP_API_URL}/api/verify-otp`);
+
+  const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/verify-otp`, { 
+    email, 
+    otp_code: otp 
+  });
+
+  if (res.data.success) {
+    setSuccess('OTP verified. Set your new password.');
+    setStep(3);
+  } else {
+    setError(res.data.message || 'OTP verification failed.');
+  }
+} catch (err) {
+  console.error("OTP verification error:", err.response?.data || err.message);
+  setError(err.response?.data?.message || 'Server error.');
+}
   };
 
   const handleForgotStep3 = async (e) => {
@@ -138,25 +146,28 @@ function Login() {
     }
 
     try {
-  const res = await axios.post('https://schedulingsystem.onrender-1.com/api/reset-password', {
-        email,
-        otp_code: otp,
-        new_password: password
-      });
+  console.log("Resetting password using:", `${process.env.REACT_APP_API_URL}/api/reset-password`);
 
-      if (res.data.success) {
-        setSuccess('Password reset successful. Please login.');
-        setStep(1);
-        setIsForgotPassword(false);
-        setEmail('');
-        setPassword('');
-        setOtp('');
-      } else {
-        setError(res.data.message || 'Failed to reset password.');
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Server error.');
-    }
+  const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-password`, {
+    email,
+    otp_code: otp,
+    new_password: password
+  });
+
+  if (res.data.success) {
+    setSuccess('Password reset successful. Please login.');
+    setStep(1);
+    setIsForgotPassword(false);
+    setEmail('');
+    setPassword('');
+    setOtp('');
+  } else {
+    setError(res.data.message || 'Failed to reset password.');
+  }
+} catch (err) {
+  console.error("Reset password error:", err.response?.data || err.message);
+  setError(err.response?.data?.message || 'Server error.');
+}
   };
 
   return (
