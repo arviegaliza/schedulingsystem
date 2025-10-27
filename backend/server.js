@@ -962,6 +962,11 @@ app.get('/test-db', async (req, res) => {
   }
 });
 
+pool.query('SELECT * FROM users LIMIT 1', (err, res) => {
+  if (err) console.error('DB connection error:', err);
+  else console.log('DB connected, users table:', res.rows);
+});
+
 
 // Add a friendly root route
 app.get('/', (req, res) => {
