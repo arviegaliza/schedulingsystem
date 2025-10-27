@@ -38,7 +38,8 @@ function Users() {
   // ✅ Call fetchUsers once when component mounts
   useEffect(() => {
     fetchUsers();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // ✅ Prevent ESLint warning but keep correct behavior
 
   const handleChange = (e) => {
     const { name, value } = e.target;
