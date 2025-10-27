@@ -15,15 +15,27 @@ function Users() {
   const [editingUserId, setEditingUserId] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  fetch('https://schedulingsystem-1.onrender.com/api/users')
-  .then(res => res.json())
-  .then(data => setUsers(data))
-  .catch(err => {
-    console.error('Fetch failed:', err);
-    toast.error('Failed to load users.');
-  });
+  // ✅ Use backend URL from environment variable or fallback to localhost
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8081';
 
+  // ✅ Define fetchUsers properly
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users`);
+      const data = await res.json();
 
+      if (data.success) {
+        setUsers(data.users || []);
+      } else {
+        setUsers(data);
+      }
+    } catch (err) {
+      console.error('Fetch failed:', err);
+      toast.error('Failed to load users.');
+    }
+  };
+
+  // ✅ Call fetchUsers once when component mounts
   useEffect(() => {
     fetchUsers();
   }, []);
@@ -55,84 +67,78 @@ function Users() {
     });
     setShowForm(true);
   };
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  setLoading(true);
-  toast.dismiss();
 
-  // ✅ Use backend URL from environment variable or fallback to localhost
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8081';
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    toast.dismiss();
 
-  try {
-    const method = editingUserId ? 'PUT' : 'POST';
-    const url = editingUserId
-      ? `${API_BASE_URL}/api/users/${editingUserId}`
-      : `${API_BASE_URL}/api/users`;
+    try {
+      const method = editingUserId ? 'PUT' : 'POST';
+      const url = editingUserId
+        ? `${API_BASE_URL}/api/users/${editingUserId}`
+        : `${API_BASE_URL}/api/users`;
 
-    const payload = editingUserId
-      ? formData
-      : {
-          employee_number: formData.employee_number,
-          email: formData.email,
-          password: formData.password,
-          type: formData.type,
-        };
+      const payload = editingUserId
+        ? formData
+        : {
+            employee_number: formData.employee_number,
+            email: formData.email,
+            password: formData.password,
+            type: formData.type,
+          };
 
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (data.success) {
-      toast.success(editingUserId ? 'User updated successfully!' : 'User created successfully!');
-      setShowForm(false);
-      setEditingUserId(null);
-      setFormData({ employee_number: '', email: '', password: '', type: '' });
-      fetchUsers(); // refresh list
-    } else {
-      toast.error(data.error || 'Operation failed');
+      if (data.success) {
+        toast.success(editingUserId ? 'User updated successfully!' : 'User created successfully!');
+        setShowForm(false);
+        setEditingUserId(null);
+        setFormData({ employee_number: '', email: '', password: '', type: '' });
+        fetchUsers(); // ✅ refresh list
+      } else {
+        toast.error(data.error || 'Operation failed');
+      }
+    } catch (err) {
+      console.error('Error:', err);
+      toast.error('An error occurred');
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error('Error:', err);
-    toast.error('An error occurred');
-  } finally {
-    setLoading(false);
-  }
-};
-const handleDelete = async (id) => {
-  toast.dismiss();
+  };
 
-  // ✅ Use the same backend base URL (local or deployed)
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8081';
+  const handleDelete = async (id) => {
+    toast.dismiss();
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/users/${id}`, {
-      method: 'DELETE',
-    });
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users/${id}`, {
+        method: 'DELETE',
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (data.success) {
-      toast.success('User deleted successfully!');
-      fetchUsers(); // refresh list
-    } else {
-      toast.error(data.error || 'Failed to delete user');
+      if (data.success) {
+        toast.success('User deleted successfully!');
+        fetchUsers(); // ✅ refresh list
+      } else {
+        toast.error(data.error || 'Failed to delete user');
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+      toast.error('An error occurred while deleting');
     }
-  } catch (err) {
-    console.error('Delete error:', err);
-    toast.error('An error occurred while deleting');
-  }
-};
-
+  };
 
   return (
     <div className="users-container">
       <ToastContainer position="top-right" autoClose={3000} />
       
-      {/* ✅ Header showing logged-in user */}
       <div className="users-header">
         <h2>Users</h2>
         <button className="new-user-btn" onClick={openNewUserForm}>
@@ -147,7 +153,6 @@ const handleDelete = async (id) => {
             <button
               type="button"
               className="close-modal-btn"
-              aria-label="Close modal"
               onClick={() => setShowForm(false)}
               style={{
                 position: 'absolute',
@@ -242,18 +247,10 @@ const handleDelete = async (id) => {
                 <td>{user.email}</td>
                 <td>{user.type}</td>
                 <td>
-                  <button
-                    className="action-btn"
-                    onClick={() => openEditForm(user)}
-                    disabled={loading}
-                  >
+                  <button className="action-btn" onClick={() => openEditForm(user)} disabled={loading}>
                     Edit
                   </button>
-                  <button
-                    className="action-btn delete"
-                    onClick={() => handleDelete(user.id)}
-                    disabled={loading}
-                  >
+                  <button className="action-btn delete" onClick={() => handleDelete(user.id)} disabled={loading}>
                     Delete
                   </button>
                 </td>
