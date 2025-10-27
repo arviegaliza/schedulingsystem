@@ -36,11 +36,19 @@ app.use(cors({
   origin: ["https://your-netlify-site.netlify.app"],
   credentials: true,
 }));
-// PostgreSQL pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // required for Neon
+  ssl: { rejectUnauthorized: false },
 });
+
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    console.error('Database connection error:', err);
+  } else {
+    console.log('Database connected:', res.rows[0]);
+  }
+});
+
 
 // Test connection
 pool.connect()
