@@ -868,34 +868,37 @@ app.delete('/api/users/:id', (req, res) => {
     res.json({ success: true });
   });
 });
-
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { employee_number, password } = req.body;
 
   if (!employee_number || !password) {
     return res.status(400).json({ error: 'Missing employee number or password' });
   }
 
-  pool.query(
-    'SELECT * FROM users WHERE employee_number = $1 AND password = ?',
-    [employee_number, password],
-    (err, results) => {
-      if (err) return res.status(500).json({ error: 'Database error' });
-      if (results.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
+  try {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE employee_number = $1 AND password = $2',
+      [employee_number, password]
+    );
 
-      const user = results[0];
-      res.json({
-        user: {
-          id: user.id,
-          email: user.email,
-          type: user.type,
-          employee_number: user.employee_number
-        }
-      });
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
-  );
-});
 
+    const user = result.rows[0];
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        type: user.type,
+        employee_number: user.employee_number
+      }
+    });
+  } catch (err) {
+    console.error('Database error:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
 app.post('/api/login1', (req, res) => {
   console.log('Login1 request received:', req.body);
   const { idnumber } = req.body;
@@ -905,17 +908,19 @@ app.post('/api/login1', (req, res) => {
   }
 
   const query = 'SELECT * FROM categories WHERE idnumber = $1 LIMIT 1';
+  
   pool.query(query, [idnumber], (err, results) => {
     if (err) {
       console.error('Login1 Error:', err);
       return res.status(500).json({ success: false, message: 'Database error' });
     }
 
-    if (results.length === 0) {
+    // ✅ PostgreSQL returns data in results.rows
+    if (results.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const user = results[0];
+    const user = results.rows[0];
     return res.json({ success: true, user });
   });
 });
