@@ -15,15 +15,14 @@ function Users() {
   const [editingUserId, setEditingUserId] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const fetchUsers = () => {
-  fetch('https://sdoinschedulingsystem.loc:8081/api/users')
-      .then(res => res.json())
-      .then(data => setUsers(data))
-      .catch(err => {
-        console.error('Fetch failed:', err);
-        toast.error('Failed to load users.');
-      });
-  };
+  fetch('https://schedulingsystem-1.onrender.com/api/users')
+  .then(res => res.json())
+  .then(data => setUsers(data))
+  .catch(err => {
+    console.error('Fetch failed:', err);
+    toast.error('Failed to load users.');
+  });
+
 
   useEffect(() => {
     fetchUsers();
@@ -56,61 +55,78 @@ function Users() {
     });
     setShowForm(true);
   };
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  setLoading(true);
+  toast.dismiss();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    toast.dismiss();
-    try {
-      const method = editingUserId ? 'PUT' : 'POST';
-      const url = editingUserId
-  ? `https://SDOINSchedulingSystem:8081/api/users/${editingUserId}`
-  : 'https://SDOINSchedulingSystem:8081/api/users';
-      const payload = editingUserId ? formData : {
-        employee_number: formData.employee_number,
-        email: formData.email,
-        password: formData.password,
-        type: formData.type
-      };
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(editingUserId ? 'User updated successfully!' : 'User created successfully!');
-        setShowForm(false);
-        setEditingUserId(null);
-        setFormData({ employee_number: '', email: '', password: '', type: '' });
-        fetchUsers();
-      } else {
-        toast.error(data.error || 'Operation failed');
-      }
-    } catch (err) {
-      toast.error('An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ✅ Use backend URL from environment variable or fallback to localhost
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8081';
 
-  const handleDelete = async (id) => {
-    toast.dismiss();
-    try {
-  const res = await fetch(`https://SDOINSchedulingSystem:8081/api/users/${id}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success('User deleted successfully!');
-        fetchUsers();
-      } else {
-        toast.error(data.error || 'Failed to delete user');
-      }
-    } catch (err) {
-      toast.error('An error occurred while deleting');
+  try {
+    const method = editingUserId ? 'PUT' : 'POST';
+    const url = editingUserId
+      ? `${API_BASE_URL}/api/users/${editingUserId}`
+      : `${API_BASE_URL}/api/users`;
+
+    const payload = editingUserId
+      ? formData
+      : {
+          employee_number: formData.employee_number,
+          email: formData.email,
+          password: formData.password,
+          type: formData.type,
+        };
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      toast.success(editingUserId ? 'User updated successfully!' : 'User created successfully!');
+      setShowForm(false);
+      setEditingUserId(null);
+      setFormData({ employee_number: '', email: '', password: '', type: '' });
+      fetchUsers(); // refresh list
+    } else {
+      toast.error(data.error || 'Operation failed');
     }
-  };
+  } catch (err) {
+    console.error('Error:', err);
+    toast.error('An error occurred');
+  } finally {
+    setLoading(false);
+  }
+};
+const handleDelete = async (id) => {
+  toast.dismiss();
+
+  // ✅ Use the same backend base URL (local or deployed)
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8081';
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/users/${id}`, {
+      method: 'DELETE',
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      toast.success('User deleted successfully!');
+      fetchUsers(); // refresh list
+    } else {
+      toast.error(data.error || 'Failed to delete user');
+    }
+  } catch (err) {
+    console.error('Delete error:', err);
+    toast.error('An error occurred while deleting');
+  }
+};
+
 
   return (
     <div className="users-container">
