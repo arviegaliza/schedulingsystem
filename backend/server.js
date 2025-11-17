@@ -541,7 +541,7 @@ app.put('/api/events/:id', (req, res) => {
   const params = [start_date + ' ' + start_time, end_date + ' ' + end_time, req.params.id];
 
   pool.query(conflictQuery, params, (err, results) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
+    if (err) return res.status(500).json({ error: '' });
     // Check for office conflict
     const hasOfficeConflict = results.some(event => {
       const eventParticipants = normalizeParticipants(event.participants);
@@ -787,33 +787,46 @@ app.post('/api/users', (req, res) => {
     return res.status(400).json({ error: 'Employee number must be exactly 7 digits.' });
   }
 
-  // Restrict only one user for these types
-  const fixedTypes = ['Administrator', 'OSDS', 'SGOD', 'CID'];
-  if (fixedTypes.includes(type)) {
-    pool.query('SELECT id FROM users WHERE type = $1', [type], (err, results) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      if (results.length > 0) {
-        return res.status(409).json({ error: `A user with type ${type} already exists.` });
-      }
-      // Continue with employee_number uniqueness check
-      pool.query(
-        'SELECT id FROM users WHERE employee_number = ?',
-        [employee_number],
-        (err, results) => {
-          if (err) return res.status(500).json({ error: 'Database error.' });
-          if (results.length > 0) {
-            return res.status(409).json({ error: 'Employee number already exists.' });
-          }
-          const sql = 'INSERT INTO users (employee_number, email, password, type) VALUES ($1, $2, $3, $4)';
-          pool.query(sql, [employee_number, email, password, type], (err, result) => {
-            if (err) return res.status(500).json({ error: 'Insert failed.' });
-            res.status(201).json({ success: true, id: result.insertId });
-          });
-        }
-      );
-    });
-    return;
+  // Restrict only one user for fixed types
+const fixedTypes = ['Administrator', 'OSDS', 'SGOD', 'CID'];
+
+if (fixedTypes.includes(type)) {
+  try {
+    // Check if a user with this type already exists
+    const { rowCount: typeCount } = await pool.query(
+      'SELECT 1 FROM users WHERE type = $1 LIMIT 1',
+      [type]
+    );
+
+    if (typeCount > 0) {
+      return res.status(409).json({ error: `A user with type ${type} already exists.` });
+    }
+
+    // Check if employee_number is already used
+    const { rowCount: empCount } = await pool.query(
+      'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
+      [employee_number]
+    );
+
+    if (empCount > 0) {
+      return res.status(409).json({ error: 'Employee number already exists.' });
+    }
+
+    // Insert new user
+    const insertSql = `
+      INSERT INTO users (employee_number, email, password, type)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id
+    `;
+    const { rows } = await pool.query(insertSql, [employee_number, email, password, type]);
+
+    return res.status(201).json({ success: true, id: rows[0].id });
+  } catch (err) {
+    console.error('Error inserting user:', err);
+    return res.status(500).json({ error: 'Database error.' });
   }
+}
+
 
   // For other types, only check employee_number uniqueness
   pool.query(
