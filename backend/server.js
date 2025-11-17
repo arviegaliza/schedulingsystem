@@ -770,13 +770,21 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
   }
 });
 
-app.get('/api/users', (req, res) => {
-  pool.query('SELECT id, employee_number, email, type FROM users', (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+
+// Get all users
+// Get all users
+app.get('/api/users', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, employee_number, email, type FROM users');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching users:', err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
 });
-app.post('/api/users', (req, res) => {
+
+// Register a user
+app.post('/api/users', async (req, res) => {
   const { employee_number, email, password, type } = req.body;
 
   if (!employee_number || !email || !password || !type) {
@@ -787,64 +795,38 @@ app.post('/api/users', (req, res) => {
     return res.status(400).json({ error: 'Employee number must be exactly 7 digits.' });
   }
 
-  // Restrict only one user for fixed types
-const fixedTypes = ['Administrator', 'OSDS', 'SGOD', 'CID'];
+  const fixedTypes = ['Administrator', 'OSDS', 'SGOD', 'CID'];
 
-if (fixedTypes.includes(type)) {
   try {
-    // Check if a user with this type already exists
-    const { rowCount: typeCount } = await pool.query(
-      'SELECT 1 FROM users WHERE type = $1 LIMIT 1',
-      [type]
-    );
-
-    if (typeCount > 0) {
-      return res.status(409).json({ error: `A user with type ${type} already exists.` });
+    // Restrict only one user for fixed types
+    if (fixedTypes.includes(type)) {
+      const typeCheck = await pool.query('SELECT 1 FROM users WHERE type = $1 LIMIT 1', [type]);
+      if (typeCheck.rowCount > 0) {
+        return res.status(409).json({ error: `A user with type ${type} already exists.` });
+      }
     }
 
-    // Check if employee_number is already used
-    const { rowCount: empCount } = await pool.query(
-      'SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1',
-      [employee_number]
-    );
-
-    if (empCount > 0) {
+    // Check employee_number uniqueness
+    const empCheck = await pool.query('SELECT 1 FROM users WHERE employee_number = $1 LIMIT 1', [employee_number]);
+    if (empCheck.rowCount > 0) {
       return res.status(409).json({ error: 'Employee number already exists.' });
     }
 
-    // Insert new user
-    const insertSql = `
-      INSERT INTO users (employee_number, email, password, type)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id
-    `;
-    const { rows } = await pool.query(insertSql, [employee_number, email, password, type]);
+    // Insert new user (plain text password)
+    const insertResult = await pool.query(
+      `INSERT INTO users (employee_number, email, password, type)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [employee_number, email, password, type]
+    );
 
-    return res.status(201).json({ success: true, id: rows[0].id });
+    res.status(201).json({ success: true, id: insertResult.rows[0].id });
   } catch (err) {
     console.error('Error inserting user:', err);
-    return res.status(500).json({ error: 'Database error.' });
+    res.status(500).json({ error: 'Database error.' });
   }
-}
-
-
-  // For other types, only check employee_number uniqueness
-  pool.query(
-    'SELECT id FROM users WHERE employee_number = $1',
-    [employee_number],
-    (err, results) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      if (results.length > 0) {
-        return res.status(409).json({ error: 'Employee number already exists.' });
-      }
-      const sql = 'INSERT INTO users (employee_number, email, password, type) VALUES ($1, $2, $3, $4)';
-      pool.query(sql, [employee_number, email, password, type], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Insert failed.' });
-        res.status(201).json({ success: true, id: result.insertId });
-      });
-    }
-  );
 });
+
 
 app.put('/api/users/:id', (req, res) => {
   const { id } = req.params;
