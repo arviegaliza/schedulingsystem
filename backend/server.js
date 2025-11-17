@@ -11,7 +11,7 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-
+const { formatManilaDateTime, safeJSONParse } = require('./utils');
 dotenv.config(); // Load .env
 
 const { Pool } = pkg; // Import Pool for PostgreSQL
@@ -115,106 +115,111 @@ function normalizeParticipants(participants) {
   return [];
 }
 
-// Cron jobs
-cron.schedule('* * * * *', () => {
-  const sql = `
-    UPDATE schedule_events SET status = 
-      CASE
-        WHEN NOW() BETWEEN CONCAT(start_date, ' ', start_time) AND CONCAT(end_date, ' ', end_time)
-          THEN 'active'
-        WHEN NOW() > CONCAT(end_date, ' ', end_time)
-          THEN 'ended'
-        ELSE 'upcoming'
-      END
-  `;
-  pool.query(sql, (err) => {
-    if (err) return console.error('❌ Failed to update statuses:', err.message);
-    io.emit('statusUpdated');
-  });
-});
 
-cron.schedule('0 0 * * *', () => {
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  const sql = `DELETE FROM schedule_events WHERE CONCAT(end_date, ' ', end_time) < ?`;
-  pool.query(sql, [now], (err, results) => {
-    if (err) return console.error('❌ Failed to delete expired events:', err.message);
-    if (results.affectedRows > 0)
-      console.log(`🧹 Deleted ${results.affectedRows} expired event(s).`);
-  });
-});
-
-cron.schedule('* * * * *', () => {
-  // Runs every 5 minutes
-  const sql = `
-    SELECT id, program AS title, participants, start_date, start_time, notified
-    FROM schedule_events
-    WHERE notified = 0
-      AND TIMESTAMP(start_date, start_time) BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 1 HOUR)
-  `;
-  pool.query(sql, (err, events) => {
-    if (err) {
-      console.error('❌ Failed to fetch upcoming events for notification:', err.message);
-      return;
-    }
-    events.forEach(event => {
-      let participants = [];
-      try {
-        participants = JSON.parse(event.participants);
-      } catch {
-        participants = [];
-      }
-      if (!participants.length) return;
-
-      // Get all emails from categories table (ignore participants)
-      const userSql = `SELECT email FROM categories`;
-      pool.query(userSql, (err2, users) => {
-        if (err2) {
-          console.error('❌ Failed to fetch emails from categories:', err2);
-          return;
-        }
-        users.forEach(user => {
-          const reminderMsg = `Reminder: You have an event "${event.program || event.title}" starting at ${formatManilaDateTime(event.start_date, event.start_time)}.`;
-          const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: user.email,
-            subject: 'Event Reminder',
-            text: reminderMsg
-          };
-          transporter.sendMail(mailOptions, (err3) => {
-            if (err3) {
-              console.error(`❌ Failed to send reminder to ${user.email}:`, err3);
-            } else {
-              console.log(`✅ Sent reminder to ${user.email} for event ${event.id}`);
-            }
-          });
-        });
-        // Mark event as notified after sending to all
-        pool.query('UPDATE schedule_events SET notified = 1 WHERE id = $1', [event.id]);
-      });
-    });
-  });
-});
-
-// Reset all events every week (Sunday at midnight)
-cron.schedule('0 0 * * 0', () => {
-  pool.query('DELETE FROM schedule_events', (err, results) => {
-    if (err) return console.error('❌ Failed to reset events weekly:', err.message);
-    console.log('🔄 All events have been reset (deleted) for the new week.');
-    io.emit('statusUpdated');
-  });
-});
-
+// Nodemailer transporter
 const transporter = nodemailer.createTransport({
   service: 'Gmail',
   auth: {
-    user: process.env.EMAIL_USER, // or your actual email
-    pass: process.env.EMAIL_PASS  // or your app password
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
   },
   tls: {
     rejectUnauthorized: false
   }
 });
-// FORGOT PASSWORD - PostgreSQL version
+
+// 1️⃣ Update event statuses (every minute)
+cron.schedule('* * * * *', async () => {
+  try {
+    const sql = `
+      UPDATE schedule_events
+      SET status = CASE
+        WHEN NOW() BETWEEN (start_date + start_time) AND (end_date + end_time) THEN 'active'
+        WHEN NOW() > (end_date + end_time) THEN 'ended'
+        ELSE 'upcoming'
+      END
+    `;
+    await pool.query(sql);
+    io.emit('statusUpdated');
+    console.log('✅ Event statuses updated');
+  } catch (err) {
+    console.error('❌ Failed to update statuses:', err.message || err);
+  }
+});
+
+// 2️⃣ Delete expired events (daily at midnight)
+cron.schedule('0 0 * * *', async () => {
+  try {
+    const sql = `DELETE FROM schedule_events WHERE (end_date + end_time) < NOW()`;
+    const res = await pool.query(sql);
+    console.log(`🧹 Deleted ${res.rowCount} expired event(s)`);
+  } catch (err) {
+    console.error('❌ Failed to delete expired events:', err.message || err);
+  }
+});
+
+// 3️⃣ Notification job (every 5 minutes)
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const sql = `
+      SELECT id, program AS title, participants, start_date, start_time, notified
+      FROM schedule_events
+      WHERE (notified = false OR notified IS NULL)
+        AND (start_date + start_time) BETWEEN NOW() AND (NOW() + INTERVAL '1 hour')
+    `;
+    const { rows: events } = await pool.query(sql);
+
+    for (const event of events) {
+      const participants = safeJSONParse(event.participants, []);
+      if (!participants.length) {
+        await pool.query('UPDATE schedule_events SET notified = true WHERE id = $1', [event.id]);
+        continue;
+      }
+
+      // Fetch emails of all participants
+      const userSql = `
+        SELECT email FROM categories
+        WHERE office = ANY($1::text[])
+      `;
+      const { rows: users } = await pool.query(userSql, [participants]);
+
+      if (users.length) {
+        await Promise.all(
+          users.map(user => {
+            const reminderMsg = `Reminder: You have an event "${event.title}" starting at ${formatManilaDateTime(event.start_date, event.start_time)}.`;
+            return transporter.sendMail({
+              from: process.env.EMAIL_USER,
+              to: user.email,
+              subject: 'Event Reminder',
+              text: reminderMsg
+            }).then(() => {
+              console.log(`✅ Sent reminder to ${user.email} for event ${event.id}`);
+            }).catch(err => {
+              console.error(`❌ Failed to send reminder to ${user.email}:`, err);
+            });
+          })
+        );
+      }
+
+      // Mark event as notified
+      await pool.query('UPDATE schedule_events SET notified = true WHERE id = $1', [event.id]);
+    }
+  } catch (err) {
+    console.error('❌ Failed to fetch upcoming events for notification:', err.message || err);
+  }
+});
+
+// 4️⃣ Reset all events every week (Sunday midnight)
+cron.schedule('0 0 * * 0', async () => {
+  try {
+    const res = await pool.query('DELETE FROM schedule_events');
+    console.log(`🔄 All events have been reset for the new week. Rows deleted: ${res.rowCount}`);
+    io.emit('statusUpdated');
+  } catch (err) {
+    console.error('❌ Failed to reset events weekly:', err.message || err);
+  }
+});
+
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
 
