@@ -20,50 +20,80 @@ const { Pool } = pkg; // Import Pool for PostgreSQL
 
 const app = express();
 
-// Middleware
+
+// trust reverse proxy (important on Render, Heroku, etc.)
+app.set('trust proxy', true);
+
+// Allowed front-end origins
+const FRONTEND_ORIGINS = [
+  "https://schedulingsystem-ten.vercel.app",
+  "http://localhost:3000" // dev
+];
+
+// General CORS middleware (kept simple + safe)
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (!origin) {
+    // allow non-browser requests (curl, server-to-server)
+    res.header('Access-Control-Allow-Origin', '*');
+  } else if (FRONTEND_ORIGINS.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else {
+    // optional: you can choose to reject unknown origins instead of silently blocking
+    res.header('Access-Control-Allow-Origin', 'null'); 
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  // keep headers for socket.io polling preflight too
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// Also register CORS via the cors library (keeps compatibility with libraries expecting it)
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (FRONTEND_ORIGINS.indexOf(origin) !== -1) return cb(null, true);
+    cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Accept']
+}));
+
+// Body parsers
 app.use(express.json());
-app.use(
-  cors({
-    origin: ["https://schedulingsystem-ten.vercel.app", "http://localhost:3000"],
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  })
-);
+app.use(express.urlencoded({ extended: true }));
 
-// Load SSL if available (development friendly)
-let httpsOptions = null;
-try {
-  httpsOptions = {
-    key: fs.readFileSync("ssl/server.key"),
-    cert: fs.readFileSync("ssl/server.cert"),
-  };
-  console.log("SSL options loaded — will create HTTPS server.");
-} catch (err) {
-  console.warn(
-    "SSL files not found or unreadable; continuing without HTTPS (development)."
-  );
-}
-
-// Create HTTP or HTTPS server depending on availability of ssl options
+// Create HTTP or HTTPS server (keep your SSL detection)
 const server = httpsOptions
   ? https.createServer(httpsOptions, app)
   : http.createServer(app);
 
-// Socket.IO: use the imported Server directly
+// Socket.IO server with matching CORS (important!)
 export const io = new Server(server, {
   cors: {
-    origin: ["https://schedulingsystem-ten.vercel.app", "http://localhost:3000"],
+    origin: FRONTEND_ORIGINS,
     methods: ["GET", "POST"],
-    credentials: true,
+    credentials: true
   },
+  // optional: path: '/socket.io' // default is fine unless you changed it client-side
 });
 
-// Example simple connection handler (optional)
-io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id);
+// Ensure socket.io polling endpoints respond to OPTIONS (some proxies require this)
+app.options('/socket.io/*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', FRONTEND_ORIGINS.join(' '));
+  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.sendStatus(204);
+});
 
-  socket.on("disconnect", () => {
-    console.log("Socket disconnected:", socket.id);
+// Simple socket connection logger
+io.on('connection', socket => {
+  console.log('Socket connected:', socket.id);
+  socket.on('disconnect', () => {
+    console.log('Socket disconnected:', socket.id);
   });
 });
 
