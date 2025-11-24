@@ -1,8 +1,10 @@
+// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fs from "fs";
 import http from "http";
+import https from "https";
 import { Server } from "socket.io";
 import pkg from "pg"; // PostgreSQL
 import jwt from "jsonwebtoken";
@@ -11,53 +13,70 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-// server.js
-import { Server } from 'socket.io';
+
 dotenv.config(); // Load .env
 
 const { Pool } = pkg; // Import Pool for PostgreSQL
 
 const app = express();
 
+// Middleware
+app.use(express.json());
+app.use(
+  cors({
+    origin: ["https://schedulingsystem-ten.vercel.app", "http://localhost:3000"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
+
+// Load SSL if available (development friendly)
 let httpsOptions = null;
 try {
   httpsOptions = {
     key: fs.readFileSync("ssl/server.key"),
     cert: fs.readFileSync("ssl/server.cert"),
   };
+  console.log("SSL options loaded — will create HTTPS server.");
 } catch (err) {
-  console.warn("SSL files not found or unreadable; continuing without HTTPS options (development).");
+  console.warn(
+    "SSL files not found or unreadable; continuing without HTTPS (development)."
+  );
 }
 
+// Create HTTP or HTTPS server depending on availability of ssl options
+const server = httpsOptions
+  ? https.createServer(httpsOptions, app)
+  : http.createServer(app);
 
-// Check required environment variables
-console.log("EMAIL_USER:", process.env.EMAIL_USER);
-console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
-console.log("DATABASE_URL:", process.env.DATABASE_URL ? "***set***" : "***missing***");
-
-// HTTP server
-const server = http.createServer(app);
-
-
-export const io = new SocketServer(server, {
+// Socket.IO: use the imported Server directly
+export const io = new Server(server, {
   cors: {
-    origin: "https://schedulingsystem-ten.vercel.app",
+    origin: ["https://schedulingsystem-ten.vercel.app", "http://localhost:3000"],
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
+// Example simple connection handler (optional)
+io.on("connection", (socket) => {
+  console.log("Socket connected:", socket.id);
 
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Required for Neon
+  socket.on("disconnect", () => {
+    console.log("Socket disconnected:", socket.id);
+  });
 });
 
-// Optional: test acquiring a client
-pool.connect()
-  .then(() => console.log("✅ Connected to Neon PostgreSQL!"))
-  .catch(err => console.error("❌ DB connection failed:", err.message));
+// Check required environment variables (debugging)
+console.log("EMAIL_USER:", process.env.EMAIL_USER);
+console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
+console.log("DATABASE_URL:", process.env.DATABASE_URL ? "***set***" : "***missing***");
+
+// Example: create your PG pool (customize pool config if necessary)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // ssl: { rejectUnauthorized: false }, // uncomment if using managed DB requiring SSL
+});
 
 // --- Utility Functions ---
 /**
