@@ -11,8 +11,6 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-// server.js
-import { Server } from 'socket.io';
 dotenv.config(); // Load .env
 
 const { Pool } = pkg; // Import Pool for PostgreSQL
@@ -96,7 +94,7 @@ io.on('connection', socket => {
   });
 });
 
-// ---------- END PASTE HERE ----------
+
 
 // --- Utility Functions ---
 /**
