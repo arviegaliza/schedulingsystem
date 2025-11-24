@@ -11,54 +11,47 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-
+// server.js
+import { Server } from 'socket.io';
 dotenv.config(); // Load .env
 
 const { Pool } = pkg; // Import Pool for PostgreSQL
 
 const app = express();
 
-// HTTPS options
-const options = {
-  key: fs.readFileSync("ssl/server.key"),
-  cert: fs.readFileSync("ssl/server.cert"),
-};
+let httpsOptions = null;
+try {
+  httpsOptions = {
+    key: fs.readFileSync("ssl/server.key"),
+    cert: fs.readFileSync("ssl/server.cert"),
+  };
+} catch (err) {
+  console.warn("SSL files not found or unreadable; continuing without HTTPS options (development).");
+}
 
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // Check required environment variables
 console.log("EMAIL_USER:", process.env.EMAIL_USER);
 console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
 console.log("DATABASE_URL:", process.env.DATABASE_URL ? "***set***" : "***missing***");
 
-// Create server first
+// HTTP server
 const server = http.createServer(app);
 
 
+export const io = new SocketServer(server, {
+  cors: {
+    origin: "https://schedulingsystem-ten.vercel.app",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
 
-
-
-app.use(cors({
-  origin: "https://schedulingsystem-ten.vercel.app",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true,
-}));
 
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }, // Required for Neon
-});
-
-// Test initial query
-pool.query('SELECT NOW()', (err, res) => {
-  if (err) {
-    console.error('Database connection error:', err);
-  } else {
-    console.log('Database connected:', res.rows[0]);
-  }
 });
 
 // Optional: test acquiring a client
@@ -371,22 +364,21 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-
 app.get('/api/department', (req, res) => {
   pool.query('SELECT DISTINCT department FROM categories', (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
 
-    // Always include SGOD, CID, OSDS
     const baseDepartments = ['SGOD', 'CID', 'OSDS'];
-    const dbDepartments = results
+    const dbDepartments = results.rows  // <-- use rows
       .map(r => r.department)
-      .filter(Boolean); // remove null/empty
+      .filter(Boolean);
 
     const allDepartments = Array.from(new Set([...baseDepartments, ...dbDepartments]));
 
     res.json(allDepartments.map(dept => ({ department: dept })));
   });
 });
+
 // POST /api/categories
 app.post('/api/categories', async (req, res) => {
   const { idnumber, office, email, department } = req.body;
@@ -479,25 +471,53 @@ app.delete('/api/categories/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete category' });
   }
 });
-
 // GET all events
 app.get('/api/events', async (req, res) => {
   try {
     const sql = `
-      SELECT id, program,
-        start_date,
-        TO_CHAR(start_time, 'HH24:MI:SS') AS start_time,
-        end_date,
-        TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
-        purpose, participants, department, status
+      SELECT id,
+             program,
+             start_date,
+             TO_CHAR(start_time, 'HH24:MI:SS') AS start_time,
+             end_date,
+             TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
+             purpose,
+             participants,
+             department,
+             status,
+             created_by,
+             created_at
       FROM schedule_events
+      ORDER BY start_date ASC, start_time ASC
     `;
     const { rows } = await pool.query(sql);
 
     const events = rows.map(event => ({
-      ...event,
-      participants: safeJSONParse(event.participants),
-      department: safeJSONParse(event.department)
+      id: event.id,
+      program: event.program,
+      // keep DB date columns as-is (Postgres returns date as string 'YYYY-MM-DD')
+      start_date: event.start_date,
+      start_time: event.start_time, // 'HH:MM:SS'
+      end_date: event.end_date,
+      end_time: event.end_time,
+      purpose: event.purpose,
+      // safeJSONParse returns [] when parsing fails or null
+      participants: safeJSONParse(event.participants, []),
+      // department might be stored as JSON or text; try parse then fallback to string/array
+      department: (() => {
+        if (!event.department) return [];
+        if (typeof event.department === 'object') return event.department;
+        try {
+          const parsed = JSON.parse(event.department);
+          return Array.isArray(parsed) ? parsed : [parsed];
+        } catch {
+          // if it's a plain string like "OSDS" return as single-element array
+          return [String(event.department)];
+        }
+      })(),
+      status: event.status,
+      created_by: event.created_by,
+      created_at: event.created_at
     }));
 
     res.json(events);
