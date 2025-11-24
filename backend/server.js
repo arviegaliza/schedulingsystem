@@ -29,18 +29,24 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 console.log("EMAIL_USER:", process.env.EMAIL_USER);
-console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
+console.log("EMAIL_PASS:", process.env.EMAIL_PASS  "***set***" : "***missing***");
+// Create server first
+const server = http.createServer(app);
 
 
 app.use(cors({
-  origin: ["https://your-netlify-site.netlify.app"],
-  credentials: true,
+  origin: 'https://schedulingsystem-ten.vercel.app',
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  credentials: true
 }));
+
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: { rejectUnauthorized: false }, // Required for Neon
 });
 
+// Test initial query
 pool.query('SELECT NOW()', (err, res) => {
   if (err) {
     console.error('Database connection error:', err);
@@ -49,22 +55,18 @@ pool.query('SELECT NOW()', (err, res) => {
   }
 });
 
-
-// Test connection
+// Optional: test acquiring a client
 pool.connect()
   .then(() => console.log("✅ Connected to Neon PostgreSQL!"))
   .catch(err => console.error("❌ DB connection failed:", err.message));
 
-// Create server
-const server = http.createServer(app);
-
-// Initialize Socket.io
-const io = new Server(server, {
-  cors: { origin: "*" },
-});
-
-
-
+// --- Utility Functions ---
+/**
+ * Safely parse JSON strings. Returns fallback (default []) if parsing fails.
+ * @param {string} input - JSON string to parse
+ * @param {any} fallback - Value to return on parse failure
+ * @returns {any}
+ */
 function safeJSONParse(input, fallback = []) {
   try {
     return JSON.parse(input || '[]');
@@ -73,16 +75,28 @@ function safeJSONParse(input, fallback = []) {
   }
 }
 
-// Helper to format time in 12-hour format with am/pm
+
+// Helper to format time in 12-hour format with AM/PM
 function formatTime12h(timeStr) {
-  // timeStr is expected to be 'HH:mm:ss' or 'HH:mm'
-  const [hour, minute] = timeStr.split(':');
-  let h = parseInt(hour, 10);
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12;
-  if (h === 0) h = 12;
-  return `${h}:${minute} ${ampm}`;
+  if (!timeStr) return '';
+
+  // Split the time string, ignore seconds if present
+  const [hourStr, minuteStr] = timeStr.split(':');
+  let hour = parseInt(hourStr, 10);
+  const minute = minuteStr || '00';
+
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+
+  return `${hour}:${minute} ${ampm}`;
 }
+
+// Example usage:
+console.log(formatTime12h('13:30')); // "1:30 PM"
+console.log(formatTime12h('00:15:00')); // "12:15 AM"
+console.log(formatTime12h('12:00')); // "12:00 PM"
+
 
 // Improved helper to format Manila date and time for reminders, mimicking event schedule formatting
 function formatManilaDateTime(dateStr, timeStr) {
@@ -352,107 +366,98 @@ app.get('/api/categories', (req, res) => {
 app.get('/api/department', (req, res) => {
   pool.query('SELECT DISTINCT department FROM categories', (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
+
     // Always include SGOD, CID, OSDS
     const baseDepartments = ['SGOD', 'CID', 'OSDS'];
-    const dbDepartments = results.map(r => r.department).filter(Boolean);
+    const dbDepartments = results
+      .map(r => r.department)
+      .filter(Boolean); // remove null/empty
+
     const allDepartments = Array.from(new Set([...baseDepartments, ...dbDepartments]));
-    res.json(allDepartments.map(department => ({ department })));
+
+    res.json(allDepartments.map(dept => ({ department: dept })));
   });
 });
+// POST /api/categories
 app.post('/api/categories', async (req, res) => {
   const { idnumber, office, email, department } = req.body;
-  const userType = req.query.userType || 'Administrator';
+  const userType = (req.query.userType || 'Administrator').trim();
 
-  // Debug logging
-  console.log('userType:', userType, 'department:', department);
-  console.log('Comparison:', userType.trim().toLowerCase() === department.trim().toLowerCase());
-
-  // Restrict non-admins from adding to other departments
-  if (
-    userType !== 'Administrator' &&
-    userType.trim().toLowerCase() !== department.trim().toLowerCase()
-  ) {
-    return res.status(403).json({ error: 'You can only add categories for your own department.' });
-  }
-
-  // Validate required fields
   if (!idnumber || !office || !email || !department) {
     return res.status(400).json({ error: 'All fields are required, including ID number.' });
   }
 
+  // Restrict non-admins from adding to other departments
+  if (userType.toLowerCase() !== 'administrator' && userType.toLowerCase() !== department.trim().toLowerCase()) {
+    return res.status(403).json({ error: 'You can only add categories for your own department.' });
+  }
+
   try {
-    const sql = `INSERT INTO categories (idnumber, office, email, department) VALUES ($1, $2, $3, $4)`;
-    await pool.query(sql, [idnumber, office, email, department]);
-    res.status(201).json({ message: 'Category added successfully' });
+    // Check for duplicate idnumber
+    const check = await pool.query('SELECT id FROM categories WHERE idnumber = $1', [idnumber]);
+    if (check.rows.length > 0) {
+      return res.status(409).json({ error: 'ID number already exists.' });
+    }
+
+    const sql = 'INSERT INTO categories (idnumber, office, email, department) VALUES ($1, $2, $3, $4) RETURNING *';
+    const { rows } = await pool.query(sql, [idnumber, office, email, department]);
+
+    res.status(201).json({ message: 'Category added successfully', category: rows[0] });
   } catch (err) {
     console.error('Insert Error:', err);
-    res.status(500).json({ error: 'Insert failed. Possibly duplicate ID number.' });
+    res.status(500).json({ error: 'Insert failed' });
   }
 });
 
-
+// PUT /api/categories/:id
 app.put('/api/categories/:id', async (req, res) => {
   const { office, email, department } = req.body;
-  const userType = req.query.userType || 'Administrator';
+  const userType = (req.query.userType || 'Administrator').trim();
   const id = req.params.id;
 
+  if (!office || !email || !department) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
   try {
-    // 1️⃣ Check if the category exists
-    const result = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Category not found' });
-    }
+    const { rows } = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Category not found.' });
 
-    const catDept = result.rows[0].department;
+    const catDept = (rows[0].department || '').trim();
 
-    // 2️⃣ Restrict based on department (if not admin)
-    if (
-      userType !== 'Administrator' &&
-      userType.trim().toLowerCase() !== catDept.trim().toLowerCase()
-    ) {
+    if (userType.toLowerCase() !== 'administrator' && userType.toLowerCase() !== catDept.toLowerCase()) {
       return res.status(403).json({ error: 'You can only edit categories for your own department.' });
     }
 
-    // 3️⃣ Perform the update
-    const sql = `UPDATE categories SET office = $1, email = $2, department = $3 WHERE id = $4`;
-    await pool.query(sql, [office, email, department, id]);
+    const sql = 'UPDATE categories SET office = $1, email = $2, department = $3 WHERE id = $4 RETURNING *';
+    const { rows: updated } = await pool.query(sql, [office, email, department, id]);
 
-    res.json({ message: 'Category updated successfully' });
+    res.json({ message: 'Category updated successfully', category: updated[0] });
   } catch (err) {
-    console.error('Error updating category:', err);
-    res.status(500).json({ error: 'Update failed' });
+    console.error('Update Error:', err);
+    res.status(500).json({ error: 'Update failed.' });
   }
 });
 
-
+// DELETE /api/categories/:id
 app.delete('/api/categories/:id', async (req, res) => {
-  const userType = req.query.userType || 'Administrator';
+  const userType = (req.query.userType || 'Administrator').trim();
   const id = req.params.id;
 
   try {
-    // 1️⃣ Check if category exists
-    const result = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Category not found' });
-    }
+    const { rows } = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Category not found.' });
 
-    const catDept = result.rows[0].department;
-
-    // 2️⃣ Department restriction
-    if (
-      userType !== 'Administrator' &&
-      userType.trim().toLowerCase() !== catDept.trim().toLowerCase()
-    ) {
+    const catDept = (rows[0].department || '').trim();
+    if (userType.toLowerCase() !== 'administrator' && userType.toLowerCase() !== catDept.toLowerCase()) {
       return res.status(403).json({ error: 'You can only delete categories for your own department.' });
     }
 
-    // 3️⃣ Delete category
     await pool.query('DELETE FROM categories WHERE id = $1', [id]);
-
-    res.json({ message: 'Category deleted' });
+    res.json({ message: 'Category deleted successfully' });
   } catch (err) {
     console.error('Error deleting category:', err);
-    res.status(500).json({ error: 'Delete failed' });
+    res.status(500).json({ error: 'Failed to delete category' });
   }
 });
 
@@ -477,122 +482,190 @@ app.get('/api/events', (req, res) => {
     res.json(events);
   });
 });
+// POST /api/events
+app.post('/api/events', async (req, res) => {
+  const {
+    program,
+    start_date,
+    start_time,
+    end_date,
+    end_time,
+    purpose,
+    participants,
+    department,
+    created_by
+  } = req.body;
 
-// PATCH POST /api/events
-app.post('/api/events', (req, res) => {
-  const { program, start_date, start_time, end_date, end_time, purpose, participants, department, created_by } = req.body;
-  if (!program || !start_date || !start_time || !end_date || !end_time || !purpose || !participants?.length || !department?.length)
+  // Validate required fields
+  if (!program || !start_date || !start_time || !end_date || !end_time || !purpose || !participants?.length || !department?.length) {
     return res.status(400).json({ error: 'All fields are required.' });
+  }
 
-  const newStart = new Date(`${start_date}T${start_time}`);
-  const newEnd = new Date(`${end_date}T${end_time}`);
+  const newStart = `${start_date} ${start_time}`;
+  const newEnd = `${end_date} ${end_time}`;
   const payloadParticipants = normalizeParticipants(participants);
 
-  // Query all events that overlap in time
-  const conflictQuery = `
-    SELECT * FROM schedule_events
-    WHERE NOT (
-      CONCAT(end_date, ' ', end_time) <= $1 OR
-      CONCAT(start_date, ' ', start_time) >= $2
-    )
-  `;
-  const params = [start_date + ' ' + start_time, end_date + ' ' + end_time];
+  try {
+    // Check for overlapping events
+    const conflictQuery = `
+      SELECT * FROM schedule_events
+      WHERE NOT (
+        (end_date || ' ' || end_time) <= $1 OR
+        (start_date || ' ' || start_time) >= $2
+      )
+    `;
+    const conflictParams = [newStart, newEnd];
+    const conflictResult = await pool.query(conflictQuery, conflictParams);
 
-  pool.query(conflictQuery, params, (err, results) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-    // Check for office conflict
-    const hasOfficeConflict = results.some(event => {
+    // Check for participant/office conflict
+    const hasConflict = conflictResult.rows.some(event => {
       const eventParticipants = normalizeParticipants(event.participants);
       return eventParticipants.some(p => payloadParticipants.includes(p));
     });
-    if (hasOfficeConflict) {
-      return res.status(409).json({ error: 'Conflict: A selected office is already booked during the selected date & time range.' });
+
+    if (hasConflict) {
+      return res.status(409).json({
+        error: 'Conflict: A selected office/participant is already booked during the selected date & time range.'
+      });
     }
-    // ... proceed with insert as before ...
-    const sql = `INSERT INTO schedule_events (program, start_date, start_time, end_date, end_time, purpose, participants, department, status, created_by)\n               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'upcoming', ?)`;
-    pool.query(sql, [
-      program, start_date, start_time, end_date, end_time, purpose,
-      JSON.stringify(participants), JSON.stringify(department), created_by
-    ], (err2) => {
-      if (err2) return res.status(500).json({ error: 'Insert failed' });
-      res.status(201).json({ message: 'Event added successfully' });
+
+    // Insert the new event
+    const insertQuery = `
+      INSERT INTO schedule_events
+        (program, start_date, start_time, end_date, end_time, purpose, participants, department, status, created_by)
+      VALUES
+        ($1,$2,$3,$4,$5,$6,$7,$8,'upcoming',$9)
+      RETURNING id
+    `;
+    const insertParams = [
+      program,
+      start_date,
+      start_time,
+      end_date,
+      end_time,
+      purpose,
+      JSON.stringify(participants),
+      JSON.stringify(department),
+      created_by
+    ];
+
+    const insertResult = await pool.query(insertQuery, insertParams);
+    res.status(201).json({
+      message: 'Event added successfully',
+      eventId: insertResult.rows[0].id
     });
-  });
+  } catch (err) {
+    console.error('Error adding event:', err);
+    res.status(500).json({ error: 'Database error while adding event.' });
+  }
 });
 
-// PATCH PUT /api/events/:id
-app.put('/api/events/:id', (req, res) => {
+
+// PATCH/PUT: Update an event
+app.put('/api/events/:id', async (req, res) => {
+  const eventId = req.params.id;
   const { program, start_date, start_time, end_date, end_time, purpose, participants, department } = req.body;
-  if (!program || !start_date || !start_time || !end_date || !end_time || !purpose || !participants?.length || !department?.length)
+
+  // Validate all required fields
+  if (!program || !start_date || !start_time || !end_date || !end_time || !purpose || !participants?.length || !department?.length) {
     return res.status(400).json({ error: 'All fields are required.' });
+  }
 
-  const newStart = new Date(`${start_date}T${start_time}`);
-  const newEnd = new Date(`${end_date}T${end_time}`);
-  const payloadParticipants = normalizeParticipants(participants);
+  const newStart = `${start_date} ${start_time}`;
+  const newEnd = `${end_date} ${end_time}`;
+  const payloadParticipants = JSON.stringify(participants);
 
-  // Query all events that overlap in time, excluding this event
-  const conflictQuery = `
-    SELECT * FROM schedule_events
-    WHERE NOT (
-      CONCAT(end_date, ' ', end_time) <= $1 OR
-      CONCAT(start_date, ' ', start_time) >= $2
-    ) AND id != $3
-  `;
-  const params = [start_date + ' ' + start_time, end_date + ' ' + end_time, req.params.id];
+  try {
+    // Check for overlapping events
+    const conflictQuery = `
+      SELECT * FROM schedule_events
+      WHERE id != $1
+      AND NOT ($2 >= end_date || $3 <= start_date)
+    `;
+    const conflictValues = [eventId, newStart, newEnd];
+    const conflictResult = await pool.query(conflictQuery, conflictValues);
 
-  pool.query(conflictQuery, params, (err, results) => {
-    if (err) return res.status(500).json({ error: '' });
-    // Check for office conflict
-    const hasOfficeConflict = results.some(event => {
-      const eventParticipants = normalizeParticipants(event.participants);
-      return eventParticipants.some(p => payloadParticipants.includes(p));
+    // Check for participant conflicts
+    const hasConflict = conflictResult.rows.some(event => {
+      const eventParticipants = JSON.parse(event.participants);
+      return eventParticipants.some(p => participants.includes(p));
     });
-    if (hasOfficeConflict) {
-      return res.status(409).json({ error: 'Conflict: A selected office is already booked during the selected date & time range.' });
+
+    if (hasConflict) {
+      return res.status(409).json({
+        error: 'Conflict: A selected office/participant is already booked during the selected date & time range.'
+      });
     }
-    // ... proceed with update as before ...
-    const sql = `
-  UPDATE schedule_events
-  SET program = $1,
-      start_date = $2,
-      start_time = $3,
-      end_date = $4,
-      end_time = $5,
-      purpose = $6,
-      participants = $7,
-      department = $8,
-      status = 'upcoming'
-  WHERE id = $9
-`;
 
-    pool.query(sql, [
+    // Update the event
+    const updateQuery = `
+      UPDATE schedule_events
+      SET program = $1,
+          start_date = $2,
+          start_time = $3,
+          end_date = $4,
+          end_time = $5,
+          purpose = $6,
+          participants = $7,
+          department = $8
+      WHERE id = $9
+      RETURNING *
+    `;
+    const updateValues = [
       program, start_date, start_time, end_date, end_time, purpose,
-      JSON.stringify(participants), JSON.stringify(department), req.params.id
-    ], (err2) => {
-      if (err2) return res.status(500).json({ error: 'Update failed' });
-      res.json({ message: 'Event updated successfully' });
-    });
-  });
+      payloadParticipants, JSON.stringify(department), eventId
+    ];
+
+    const updateResult = await pool.query(updateQuery, updateValues);
+    if (updateResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Event not found.' });
+    }
+
+    res.json({ message: 'Event updated successfully', event: updateResult.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error while updating event.' });
+  }
 });
 
-app.delete('/api/events/:id', (req, res) => {
-  pool.query('DELETE FROM schedule_events WHERE id = ?', [req.params.id], (err) => {
-    if (err) return res.status(500).json({ error: 'Delete failed' });
+// DELETE an event
+app.delete('/api/events/:id', async (req, res) => {
+  const eventId = req.params.id;
+
+  try {
+    const deleteResult = await pool.query(
+      'DELETE FROM schedule_events WHERE id = $1 RETURNING id',
+      [eventId]
+    );
+
+    if (deleteResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
     res.json({ message: 'Event deleted successfully' });
-  });
+  } catch (err) {
+    console.error('Delete failed:', err);
+    res.status(500).json({ error: 'Delete failed' });
+  }
 });
 
-// Helper to get department filter
+// Helper to get department filter safely
 function getDepartmentFilter(department, userType, table = 'users') {
   if (!department || department === 'All') {
-    if (userType === 'Administrator') return '';
-    if (table === 'events') return ` AND JSON_CONTAINS(department, '"${userType}"')`;
-    if (table === 'categories') return ` AND department = '${userType}'`;
-    return ` AND type = '${userType}'`;
+    if (userType === 'Administrator') return { sql: '', params: [] };
+
+    if (table === 'events') {
+      // PostgreSQL JSON containment operator @>
+      return { sql: ' AND department @> $1', params: [JSON.stringify([userType])] };
+    }
+
+    if (table === 'categories') return { sql: ' AND department = $1', params: [userType] };
+    return { sql: ' AND type = $1', params: [userType] };
   }
-  if (table === 'events') return ` AND JSON_CONTAINS(department, '"${department}"')`;
-  if (table === 'categories') return ` AND department = '${department}'`;
-  return ` AND type = '${department}'`;
+
+  if (table === 'events') return { sql: ' AND department @> $1', params: [JSON.stringify([department])] };
+  if (table === 'categories') return { sql: ' AND department = $1', params: [department] };
+  return { sql: ' AND type = $1', params: [department] };
 }
 
 // Helper to get date filter
@@ -624,42 +697,46 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
       return res.status(400).json({ error: 'Start and end dates are required for weekly reports.' });
     }
     // Fetch categories
-    const categories = await new Promise((resolve, reject) => {
-      pool.query(
-        `SELECT * FROM categories WHERE 1=1${getDepartmentFilter(department, userType, 'categories')}`,
-        (err, results) => (err ? reject(err) : resolve(results))
-      );
-    });
-    // Fetch users
-    const users = await new Promise((resolve, reject) => {
-      let userSql = 'SELECT id, employee_number, email, type FROM users WHERE 1=1';
-      if (department && department !== 'All' && userType !== 'Administrator') {
-        userSql += ` AND type = '${department}'`;
-      } else if (department && department !== 'All' && userType === 'Administrator') {
-        userSql += ` AND type = '${department}'`;
-      }
-      pool.query(userSql, (err, results) => (err ? reject(err) : resolve(results)));
-    });
-    // Fetch events
-    let events;
-    if (type === 'monthly') {
-      // start = month (1-12), end = year (e.g., 2025)
-      events = await new Promise((resolve, reject) => {
-        pool.query(
-          `SELECT * FROM schedule_events WHERE 1=1${getDepartmentFilter(department, userType, 'events')} AND MONTH(start_date) = $1 AND YEAR(start_date) = $2`,
-          [start, end],
-          (err, results) => (err ? reject(err) : resolve(results))
-        );
-      });
-    } else {
-      // weekly or other: use date range
-      events = await new Promise((resolve, reject) => {
-        pool.query(
-          `SELECT * FROM schedule_events WHERE 1=1${getDepartmentFilter(department, userType, 'events')}${getDateFilter(start, end)}`,
-          (err, results) => (err ? reject(err) : resolve(results))
-        );
-      });
-    }
+const categories = await new Promise((resolve, reject) => {
+  const categoryQuery = `SELECT * FROM categories WHERE 1=1 ${getDepartmentFilter(department, userType, 'categories')}`;
+  pool.query(categoryQuery, (err, results) => (err ? reject(err) : resolve(results)));
+});
+
+// Fetch users
+const users = await new Promise((resolve, reject) => {
+  let userSql = 'SELECT id, employee_number, email, type FROM users WHERE 1=1';
+  if (department && department !== 'All') {
+    userSql += ` AND type = $1`;
+    pool.query(userSql, [department], (err, results) => (err ? reject(err) : resolve(results)));
+  } else {
+    pool.query(userSql, (err, results) => (err ? reject(err) : resolve(results)));
+  }
+});
+
+// Fetch events
+let events;
+if (type === 'monthly') {
+  // PostgreSQL: use EXTRACT(MONTH FROM ...) and EXTRACT(YEAR FROM ...)
+  events = await new Promise((resolve, reject) => {
+    const eventSql = `
+      SELECT * FROM schedule_events
+      WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')}
+      AND EXTRACT(MONTH FROM start_date) = $1
+      AND EXTRACT(YEAR FROM start_date) = $2
+    `;
+    pool.query(eventSql, [start, end], (err, results) => (err ? reject(err) : resolve(results)));
+  });
+} else {
+  // weekly or custom range: use BETWEEN
+  events = await new Promise((resolve, reject) => {
+    const eventSql = `
+      SELECT * FROM schedule_events
+      WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')} ${getDateFilter(start, end)}
+    `;
+    pool.query(eventSql, (err, results) => (err ? reject(err) : resolve(results)));
+  });
+}
+
 
     if (format === 'xlsx') {
       // Excel export

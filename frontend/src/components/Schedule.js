@@ -86,7 +86,10 @@ function Schedule() {
 
   const fetchEvents = useCallback(async () => {
     try {
-      const res = await axios.get('http://sdoinschedulingsystem.loc:8081/api/events');
+          const res = await axios.get(
+  `${process.env.REACT_APP_API_URL}/api/events`
+);
+
       const eventsWithParsedData = res.data.map(event => ({
         ...event,
         participants: typeof event.participants === 'string' ? JSON.parse(event.participants) : event.participants || [],
@@ -99,7 +102,8 @@ function Schedule() {
   }, []);
 
   useEffect(() => {
-  const socket = io('http://sdoinschedulingsystem.loc:8081');
+    const socket = io(process.env.REACT_APP_API_URL);
+
     socket.on('connect', () => console.log('🟢 Connected to WebSocket'));
     socket.on('statusUpdated', () => fetchEvents());
     return () => socket.disconnect();
@@ -107,7 +111,10 @@ function Schedule() {
 
   const fetchDepartments = useCallback(async () => {
     try {
-  const res = await axios.get('http://sdoinschedulingsystem.loc:8081/api/department');
+      const res = await axios.get(
+  `${process.env.REACT_APP_API_URL}/api/department`
+);
+
       setDepartments(res.data.map(d => d.department));
     } catch (err) {
       toast.error('Failed to load departments.');
@@ -116,7 +123,10 @@ function Schedule() {
 
   const fetchCategories = useCallback(async () => {
     try {
-  const res = await axios.get('http://sdoinschedulingsystem.loc:8081/api/categories');
+        const res = await axios.get(
+  `${process.env.REACT_APP_API_URL}/api/categories`
+);
+
       setCategories(res.data);
     } catch (err) {
       toast.error('Failed to load categories.');
@@ -197,10 +207,18 @@ function Schedule() {
 
     try {
       if (editMode) {
-  await axios.put(`http://sdoinschedulingsystem.loc:8081/api/events/${editingId}`, payload);
+            await axios.put(
+  `${process.env.REACT_APP_API_URL}/api/events/${editingId}`,
+  payload
+);
+
         toast.success('Event updated successfully!');
       } else {
-  await axios.post('http://sdoinschedulingsystem.loc:8081/api/events', payload);
+            await axios.post(
+  `${process.env.REACT_APP_API_URL}/api/events`,
+  payload
+);
+
         toast.success('Event added successfully!');
       }
       fetchEvents();
@@ -350,7 +368,10 @@ function Schedule() {
   const handleDelete = async (id) => {
     toast.dismiss();
     try {
-      await axios.delete(`http://sdoinschedulingsystem.loc:8081/api/events/${id}`);
+          await axios.delete(
+  `${process.env.REACT_APP_API_URL}/api/events/${id}`
+);
+
       toast.success('Event deleted successfully!');
       fetchEvents();
     } catch (err) {

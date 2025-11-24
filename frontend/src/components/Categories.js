@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -21,12 +21,14 @@ function Categories() {
   const [user, setUser] = useState(null);
 
   const departments = ['OSDS', 'SGOD', 'CID'];
-  const API_URL = 'http://sdoinschedulingsystem.loc:8081/api/categories';
+  const API_URL = `${process.env.REACT_APP_API_URL}/api/categories`;
 
-  const fetchCategories = async () => {
+  // Memoized fetchCategories
+  const fetchCategories = useCallback(async () => {
+    if (!user) return; // Wait until user is loaded
     try {
       setIsLoading(true);
-      const res = await axios.get(API_URL);
+      const res = await axios.get(`${API_URL}?userType=${user.type}`); // pass userType
       setCategoryList(res.data);
     } catch (err) {
       console.error('Fetch error:', err);
@@ -34,14 +36,20 @@ function Categories() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [API_URL, user]);
 
+  // Load user from localStorage
   useEffect(() => {
-    fetchCategories();
     const storedUser = JSON.parse(localStorage.getItem('user'));
     setUser(storedUser);
   }, []);
 
+  // Fetch categories once user is loaded
+  useEffect(() => {
+    if (user) fetchCategories();
+  }, [user, fetchCategories]);
+
+  // Lock scroll when viewing category
   useEffect(() => {
     if (viewedCategory) {
       document.body.classList.add('no-scroll');
@@ -113,7 +121,6 @@ function Categories() {
     toast.dismiss();
     try {
       const res = await axios.delete(`${API_URL}/${id}?userType=${user?.type}`);
-      
       if (res.status >= 200 && res.status < 300) {
         toast.success('Category deleted!');
         fetchCategories();
@@ -138,7 +145,6 @@ function Categories() {
     ? categoryList
     : categoryList.filter(cat => cat.department === filterDept);
 
-  // Only allow edit/delete for admin or the department that owns the category
   const canEditOrDelete = (cat) => {
     if (user?.type === 'Administrator') return true;
     return user?.type === cat.department;
@@ -181,63 +187,63 @@ function Categories() {
               >
                 ×
               </button>
-            <form onSubmit={handleSubmit} className="category-form">
-              <div>
-                <label>ID Number:</label>
-                <input 
-                  name="idnumber" 
-                  value={formData.idnumber} 
-                  onChange={handleChange} 
-                  required 
-                  disabled={isLoading}
-                />
-              </div>
-              <div>
-                <label>Office:</label>
-                <input 
-                  name="office" 
-                  value={formData.office} 
-                  onChange={handleChange} 
-                  required 
-                  disabled={isLoading}
-                />
-              </div>
-              <div>
-                <label>Email:</label>
-                <input 
-                  name="email" 
-                  value={formData.email} 
-                  onChange={handleChange} 
-                  required 
-                  disabled={isLoading}
-                />
-              </div>
-              <div>
-                <label>Department:</label>
-                {user?.type === 'Administrator' ? (
-                  <select
-                    name="department"
-                    value={formData.department}
-                    onChange={handleChange}
+              <form onSubmit={handleSubmit} className="category-form">
+                <div>
+                  <label>ID Number:</label>
+                  <input 
+                    name="idnumber" 
+                    value={formData.idnumber} 
+                    onChange={handleChange} 
+                    required 
                     disabled={isLoading}
-                  >
-                    {departments.map(dept => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    name="department"
-                    value={user?.type || formData.department}
-                    readOnly
-                    disabled
                   />
-                )}
-              </div>
-              <button type="submit" disabled={isLoading}>
-                {isLoading ? 'Processing...' : editMode ? 'Update' : 'Add'} Category
-              </button>
-            </form>
+                </div>
+                <div>
+                  <label>Office:</label>
+                  <input 
+                    name="office" 
+                    value={formData.office} 
+                    onChange={handleChange} 
+                    required 
+                    disabled={isLoading}
+                  />
+                </div>
+                <div>
+                  <label>Email:</label>
+                  <input 
+                    name="email" 
+                    value={formData.email} 
+                    onChange={handleChange} 
+                    required 
+                    disabled={isLoading}
+                  />
+                </div>
+                <div>
+                  <label>Department:</label>
+                  {user?.type === 'Administrator' ? (
+                    <select
+                      name="department"
+                      value={formData.department}
+                      onChange={handleChange}
+                      disabled={isLoading}
+                    >
+                      {departments.map(dept => (
+                        <option key={dept} value={dept}>{dept}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      name="department"
+                      value={user?.type || formData.department}
+                      readOnly
+                      disabled
+                    />
+                  )}
+                </div>
+                <button type="submit" disabled={isLoading}>
+                  {isLoading ? 'Processing...' : editMode ? 'Update' : 'Add'} Category
+                </button>
+              </form>
             </div>
           </div>
         )}
