@@ -15,15 +15,13 @@ import { format } from "date-fns";
 
 dotenv.config(); // <-- load environment variables first
 
-// Nodemailer transporter
+
 const transporter = nodemailer.createTransport({
-  service: 'Gmail',
+  host: 'smtp.sendgrid.net',
+  port: 587,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
+    user: 'apikey', // fixed value for SendGrid
+    pass: process.env.SENDGRID_API_KEY
   }
 });
 
