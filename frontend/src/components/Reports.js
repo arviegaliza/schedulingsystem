@@ -11,14 +11,17 @@ const Reports = () => {
   const [end, setEnd] = useState('');
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
+const BASE_URL = process.env.REACT_APP_API_URL;
 
-  useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem('user'));
-    setUser(storedUser);
-  axios.get('http://SDOINSchedulingSystem:8081/api/department')
-      .then(res => setDepartments(res.data.map(d => d.department)))
-      .catch(() => setDepartments([]));
-  }, []);
+
+useEffect(() => {
+  const storedUser = JSON.parse(localStorage.getItem('user'));
+  setUser(storedUser);
+
+  axios.get(`${BASE_URL}/api/department`)
+    .then(res => setDepartments(res.data.map(d => d.department)))
+    .catch(() => setDepartments([]));
+}, []);
 
   const handleDownload = async () => {
     if (type === 'monthly' && (!start || !end)) {
@@ -38,10 +41,13 @@ const Reports = () => {
         format,
         userType: user?.type || 'Administrator',
       };
-  const response = await axios.get(`http://sdoinschedulingsystem.loc:8081/api/reports/${type}`, {
-        params,
-        responseType: 'blob',
-      });
+const BASE_URL = process.env.REACT_APP_API_URL;
+
+const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
+  params,
+  responseType: 'blob',
+});
+
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
