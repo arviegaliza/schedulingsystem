@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fs from "fs";
-import https from "https";
+import http from "http";
 import { Server } from "socket.io";
 import pkg from "pg"; // PostgreSQL
 import jwt from "jsonwebtoken";
@@ -11,8 +11,10 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-dotenv.config();
 
+dotenv.config(); // <-- load environment variables first
+
+// ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
 
 const pool = new Pool({
@@ -23,7 +25,7 @@ const pool = new Pool({
 const app = express();
 
 // --------- TRUST PROXY & BODY PARSERS ----------
-app.set('trust proxy', true);
+app.set("trust proxy", true);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -37,7 +39,7 @@ const FRONTEND_ORIGINS = [
 app.use(cors({
   origin: FRONTEND_ORIGINS,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
 }));
 
 // Make sure all responses include CORS headers
@@ -46,24 +48,12 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Credentials", "true");
   res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-// --------- SSL / HTTP SERVER ----------
-let httpsOptions = null;
-try {
-  httpsOptions = {
-    key: fs.readFileSync("ssl/server.key"),
-    cert: fs.readFileSync("ssl/server.cert"),
-  };
-  console.log("SSL loaded — HTTPS server will be used.");
-} catch (err) {
-  console.warn("SSL not found, using HTTP.");
-}
-
-const server = httpsOptions
-  ? https.createServer(httpsOptions, app)
-  : http.createServer(app);
+// --------- HTTP SERVER (Render handles HTTPS) ----------
+const server = http.createServer(app);
 
 // --------- SOCKET.IO ----------
 export const io = new Server(server, {
