@@ -1,10 +1,8 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fs from "fs";
 import http from "http";
-import https from "https";
 import { Server } from "socket.io";
 import pkg from "pg"; // PostgreSQL
 import jwt from "jsonwebtoken";
@@ -13,13 +11,14 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-
+// server.js
+import { Server } from 'socket.io';
 dotenv.config(); // Load .env
 
 const { Pool } = pkg; // Import Pool for PostgreSQL
 
 const app = express();
-
+// ---------- START PASTE HERE (replace current middleware/server/io block) ----------
 
 // trust reverse proxy (important on Render, Heroku, etc.)
 app.set('trust proxy', true);
@@ -65,21 +64,8 @@ app.use(cors({
 // Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// Load SSL if available (development friendly)
-let httpsOptions = null;
-try {
-  httpsOptions = {
-    key: fs.readFileSync("ssl/server.key"),
-    cert: fs.readFileSync("ssl/server.cert"),
-  };
-  console.log("SSL options loaded — will create HTTPS server.");
-} catch (err) {
-  console.warn(
-    "SSL files not found or unreadable; continuing without HTTPS (development)."
-  );
-}
 
-// Create HTTP or HTTPS server depending on SSL availability
+// Create HTTP or HTTPS server (keep your SSL detection)
 const server = httpsOptions
   ? https.createServer(httpsOptions, app)
   : http.createServer(app);
@@ -110,16 +96,7 @@ io.on('connection', socket => {
   });
 });
 
-// Check required environment variables (debugging)
-console.log("EMAIL_USER:", process.env.EMAIL_USER);
-console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
-console.log("DATABASE_URL:", process.env.DATABASE_URL ? "***set***" : "***missing***");
-
-// Example: create your PG pool (customize pool config if necessary)
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  // ssl: { rejectUnauthorized: false }, // uncomment if using managed DB requiring SSL
-});
+// ---------- END PASTE HERE ----------
 
 // --- Utility Functions ---
 /**
@@ -533,53 +510,25 @@ app.delete('/api/categories/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete category' });
   }
 });
+
 // GET all events
 app.get('/api/events', async (req, res) => {
   try {
     const sql = `
-      SELECT id,
-             program,
-             start_date,
-             TO_CHAR(start_time, 'HH24:MI:SS') AS start_time,
-             end_date,
-             TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
-             purpose,
-             participants,
-             department,
-             status,
-             created_by,
-             created_at
+      SELECT id, program,
+        start_date,
+        TO_CHAR(start_time, 'HH24:MI:SS') AS start_time,
+        end_date,
+        TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
+        purpose, participants, department, status
       FROM schedule_events
-      ORDER BY start_date ASC, start_time ASC
     `;
     const { rows } = await pool.query(sql);
 
     const events = rows.map(event => ({
-      id: event.id,
-      program: event.program,
-      // keep DB date columns as-is (Postgres returns date as string 'YYYY-MM-DD')
-      start_date: event.start_date,
-      start_time: event.start_time, // 'HH:MM:SS'
-      end_date: event.end_date,
-      end_time: event.end_time,
-      purpose: event.purpose,
-      // safeJSONParse returns [] when parsing fails or null
-      participants: safeJSONParse(event.participants, []),
-      // department might be stored as JSON or text; try parse then fallback to string/array
-      department: (() => {
-        if (!event.department) return [];
-        if (typeof event.department === 'object') return event.department;
-        try {
-          const parsed = JSON.parse(event.department);
-          return Array.isArray(parsed) ? parsed : [parsed];
-        } catch {
-          // if it's a plain string like "OSDS" return as single-element array
-          return [String(event.department)];
-        }
-      })(),
-      status: event.status,
-      created_by: event.created_by,
-      created_at: event.created_at
+      ...event,
+      participants: safeJSONParse(event.participants),
+      department: safeJSONParse(event.department)
     }));
 
     res.json(events);
