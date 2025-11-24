@@ -3,7 +3,10 @@ import { io } from "socket.io-client";
 
 export default function useSocket(onStatusUpdate) {
   useEffect(() => {
-  const socket = io("http://SDOINSchedulingSystem:8081"); // Use your backend port
+    // ⚠️ Change http:// → https:// (or wss:// for websockets)
+    const socket = io("https://SDOINSchedulingSystem:8081", {
+      transports: ["websocket", "polling"],
+    });
 
     socket.on("connect", () => {
       console.log("Connected to Socket.IO server!");
@@ -17,4 +20,4 @@ export default function useSocket(onStatusUpdate) {
       socket.disconnect();
     };
   }, [onStatusUpdate]);
-} 
+}

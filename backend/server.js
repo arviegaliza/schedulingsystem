@@ -356,12 +356,15 @@ app.post('/api/reset-password', async (req, res) => {
 
 
 // Categories
-app.get('/api/categories', (req, res) => {
-  pool.query('SELECT * FROM categories', (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+app.get('/api/categories', async (req, res) => {
+  try {
+    const results = await pool.query('SELECT * FROM categories');
+    res.json(results.rows); // ✅ Use .rows to get the actual array
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
+
 
 app.get('/api/department', (req, res) => {
   pool.query('SELECT DISTINCT department FROM categories', (err, results) => {
@@ -415,9 +418,41 @@ app.put('/api/categories/:id', async (req, res) => {
   const userType = (req.query.userType || 'Administrator').trim();
   const id = req.params.id;
 
+  // Validate required fields
   if (!office || !email || !department) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
+
+  try {
+    // 1️⃣ Check if the category exists
+    const { rows } = await pool.query(
+      'SELECT department FROM categories WHERE id = $1',
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Category not found.' });
+    }
+
+    const catDept = (rows[0].department || '').trim();
+
+    // 2️⃣ Restrict based on department (if not admin)
+    if (userType.toLowerCase() !== 'administrator' &&
+        userType.toLowerCase() !== catDept.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only edit categories for your own department.' });
+    }
+
+    // 3️⃣ Update the category
+    await pool.query(
+      'UPDATE categories SET office = $1, email = $2, department = $3 WHERE id = $4',
+      [office, email, department, id]
+    );
+
+    res.json({ message: 'Category updated successfully' });
+  } catch (err) {
+    console.error('Update Error:', err);
+    res.status(500).json({ error: 'Update failed.' });
+  }
+});
 
   try {
     const { rows } = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
@@ -461,27 +496,33 @@ app.delete('/api/categories/:id', async (req, res) => {
   }
 });
 
-
 // GET all events
-app.get('/api/events', (req, res) => {
-  const sql = `
-    SELECT id, program, start_date, 
-      DATE_FORMAT(start_time, '%H:%i:%s') AS start_time,
-      end_date, 
-      DATE_FORMAT(end_time, '%H:%i:%s') AS end_time,
-      purpose, participants, department, status
-    FROM schedule_events
-  `;
-  pool.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const events = results.map(event => ({
+app.get('/api/events', async (req, res) => {
+  try {
+    const sql = `
+      SELECT id, program,
+        start_date,
+        TO_CHAR(start_time, 'HH24:MI:SS') AS start_time,
+        end_date,
+        TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
+        purpose, participants, department, status
+      FROM schedule_events
+    `;
+    const { rows } = await pool.query(sql);
+
+    const events = rows.map(event => ({
       ...event,
       participants: safeJSONParse(event.participants),
       department: safeJSONParse(event.department)
     }));
+
     res.json(events);
-  });
+  } catch (err) {
+    console.error('Fetch events error:', err);
+    res.status(500).json({ error: 'Failed to fetch events' });
+  }
 });
+
 // POST /api/events
 app.post('/api/events', async (req, res) => {
   const {
