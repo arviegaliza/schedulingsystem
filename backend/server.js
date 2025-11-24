@@ -11,6 +11,7 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
+import { format } from "date-fns";
 
 dotenv.config(); // <-- load environment variables first
 
@@ -721,64 +722,50 @@ function checkReportAccess(req, res, next) {
   req.userType = userType;
   next();
 }
-
+// GET reports endpoint
 app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
   const { department = 'All', start, end, format = 'xlsx' } = req.query;
   const { type } = req.params; // 'weekly' or 'monthly'
   const userType = req.userType;
 
   try {
-    if (type === 'monthly' && (!start || !end)) {
-      return res.status(400).json({ error: 'Month and year are required for monthly reports.' });
+    // Validate required dates
+    if ((type === 'monthly' || type !== 'monthly') && (!start || !end)) {
+      return res.status(400).json({ error: 'Start and end dates are required.' });
     }
-    if (type !== 'monthly' && (!start || !end)) {
-      return res.status(400).json({ error: 'Start and end dates are required for weekly reports.' });
-    }
+
     // Fetch categories
-const categories = await new Promise((resolve, reject) => {
-  const categoryQuery = `SELECT * FROM categories WHERE 1=1 ${getDepartmentFilter(department, userType, 'categories')}`;
-  pool.query(categoryQuery, (err, results) => (err ? reject(err) : resolve(results)));
-});
+    const categories = await pool.query(
+      `SELECT * FROM categories WHERE 1=1 ${getDepartmentFilter(department, userType, 'categories')}`
+    ).then(r => r.rows);
 
-// Fetch users
-const users = await new Promise((resolve, reject) => {
-  let userSql = 'SELECT id, employee_number, email, type FROM users WHERE 1=1';
-  if (department && department !== 'All') {
-    userSql += ` AND type = $1`;
-    pool.query(userSql, [department], (err, results) => (err ? reject(err) : resolve(results)));
-  } else {
-    pool.query(userSql, (err, results) => (err ? reject(err) : resolve(results)));
-  }
-});
+    // Fetch users
+    const usersQuery = 'SELECT id, employee_number, email, type FROM users WHERE 1=1' + 
+                       (department && department !== 'All' ? ' AND type = $1' : '');
+    const users = await pool.query(usersQuery, department && department !== 'All' ? [department] : []).then(r => r.rows);
 
-// Fetch events
-let events;
-if (type === 'monthly') {
-  // PostgreSQL: use EXTRACT(MONTH FROM ...) and EXTRACT(YEAR FROM ...)
-  events = await new Promise((resolve, reject) => {
-    const eventSql = `
-      SELECT * FROM schedule_events
-      WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')}
-      AND EXTRACT(MONTH FROM start_date) = $1
-      AND EXTRACT(YEAR FROM start_date) = $2
-    `;
-    pool.query(eventSql, [start, end], (err, results) => (err ? reject(err) : resolve(results)));
-  });
-} else {
-  // weekly or custom range: use BETWEEN
-  events = await new Promise((resolve, reject) => {
-    const eventSql = `
-      SELECT * FROM schedule_events
-      WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')} ${getDateFilter(start, end)}
-    `;
-    pool.query(eventSql, (err, results) => (err ? reject(err) : resolve(results)));
-  });
-}
+    // Fetch events
+    let events;
+    if (type === 'monthly') {
+      events = await pool.query(
+        `SELECT * FROM schedule_events
+         WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')}
+         AND EXTRACT(MONTH FROM start_date) = $1
+         AND EXTRACT(YEAR FROM start_date) = $2`,
+        [start, end]
+      ).then(r => r.rows);
+    } else {
+      events = await pool.query(
+        `SELECT * FROM schedule_events
+         WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')} ${getDateFilter(start, end)}`
+      ).then(r => r.rows);
+    }
 
+    // ------------------- EXPORT -------------------
 
     if (format === 'xlsx') {
-      // Excel export
       const workbook = new ExcelJS.Workbook();
+
       // Categories sheet
       const catSheet = workbook.addWorksheet('Categories');
       catSheet.columns = [
@@ -788,6 +775,7 @@ if (type === 'monthly') {
         { header: 'Department', key: 'department' },
       ];
       categories.forEach(row => catSheet.addRow(row));
+
       // Users sheet
       const userSheet = workbook.addWorksheet('Users');
       userSheet.columns = [
@@ -797,6 +785,7 @@ if (type === 'monthly') {
         { header: 'Type', key: 'type' },
       ];
       users.forEach(row => userSheet.addRow(row));
+
       // Events sheet
       const eventSheet = workbook.addWorksheet('Events');
       eventSheet.columns = [
@@ -813,72 +802,64 @@ if (type === 'monthly') {
         { header: 'Created By', key: 'created_by' },
         { header: 'Created At', key: 'created_at' },
       ];
-      // Build a map from participant name to office
+
       const officeMap = {};
       categories.forEach(cat => {
-        if (cat.office) {
-          officeMap[cat.office] = cat.office;
-        }
-        // If you want to match by name, you can add: officeMap[cat.name] = cat.office;
+        if (cat.office) officeMap[cat.office] = cat.office;
       });
 
-      // Helper to format participants with office (must be outside export blocks)
-      function formatParticipants(participants) {
+      const formatParticipants = (participants) => {
         if (!participants) return '';
         let arr = participants;
         if (typeof arr === 'string') {
           try { arr = JSON.parse(arr); } catch { arr = [arr]; }
         }
-        return arr.map(p => `${p}${officeMap[p] ? ' (' + officeMap[p] + ')' : ''}`).join(', ');
-      }
-   
-      events.forEach(row => {
-        eventSheet.addRow({
-          ...row,
-          participants: formatParticipants(row.participants),
-          department: row.department,
-          created_by: row.created_by,
-          created_at: row.created_at,
-          start_date: row.start_date,
-          start_time: row.start_time,
-          end_date: row.end_date,
-          end_time: row.end_time
-        });
-      });
+        return arr.map(p => `${p}${officeMap[p] ? ` (${officeMap[p]})` : ''}`).join(', ');
+      };
+
+      events.forEach(ev => eventSheet.addRow({
+        ...ev,
+        participants: formatParticipants(ev.participants),
+      }));
+
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename=report_${type}_${department}_${Date.now()}.xlsx`);
       await workbook.xlsx.write(res);
       res.end();
+
     } else if (format === 'pdf') {
-      // NEW PDF export (simple)
       const doc = new PDFDocument();
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=report_${type}_${department}_${Date.now()}.pdf`);
       doc.pipe(res);
+
       doc.fontSize(18).text(`Events Report (${type.toUpperCase()}) - Department: ${department}`, { align: 'center' });
       doc.moveDown();
-      if (events.length === 0) {
+
+      if (!events.length) {
         doc.text('No events found for this period.');
       } else {
         events.forEach(ev => {
           doc.moveDown(0.5);
           doc.fontSize(12).text(`Program: ${ev.program || ''}`);
-          // Format dates to 'YYYY-MM-DD' in Asia/Manila timezone
           const startDate = ev.start_date ? new Date(ev.start_date).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' }) : '';
           const endDate = ev.end_date ? new Date(ev.end_date).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' }) : '';
           doc.text(`Start Date: ${startDate}`);
           doc.text(`End Date: ${endDate}`);
-          doc.text(`Department: ${Array.isArray(ev.department) ? ev.department.join(', ') : (ev.department || '')}`);
-          doc.text(`Participants: ${Array.isArray(ev.participants) ? ev.participants.join(', ') : (ev.participants || '')}`);
+          doc.text(`Department: ${Array.isArray(ev.department) ? ev.department.join(', ') : ev.department || ''}`);
+          doc.text(`Participants: ${Array.isArray(ev.participants) ? ev.participants.join(', ') : ev.participants || ''}`);
           doc.text(`Status: ${ev.status || ''}`);
           doc.moveDown(0.5);
           doc.text('-----------------------------');
         });
       }
+
       doc.end();
+
     } else {
       res.status(400).json({ error: 'Invalid format' });
     }
+
   } catch (err) {
     console.error('Report error:', err);
     res.status(500).json({ error: 'Failed to generate report' });
@@ -886,7 +867,6 @@ if (type === 'monthly') {
 });
 
 
-// Get all users
 // Get all users
 app.get('/api/users', async (req, res) => {
   try {
