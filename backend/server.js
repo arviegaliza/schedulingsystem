@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import fs from "fs";
 import http from "http";
 import { Server } from "socket.io";
 import pkg from "pg"; // PostgreSQL
@@ -25,7 +24,7 @@ const FRONTEND_ORIGINS = [
   "http://localhost:3000" // dev
 ];
 
-// General CORS
+// General CORS middleware
 app.use((req, res, next) => {
   const origin = req.get('origin');
   if (!origin) {
@@ -42,7 +41,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS via library
+// Also register CORS via the cors library
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
@@ -59,7 +58,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ---------- HTTP Server ----------
-const server = http.createServer(app); // simplified, no httpsOptions needed
+const server = http.createServer(app); // just HTTP, no httpsOptions needed
 
 // ---------- Socket.IO ----------
 export const io = new Server(server, {
@@ -70,13 +69,6 @@ export const io = new Server(server, {
   },
 });
 
-app.options('/socket.io/*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', FRONTEND_ORIGINS.join(' '));
-  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.sendStatus(204);
-});
-
 // Simple socket connection logger
 io.on('connection', socket => {
   console.log('Socket connected:', socket.id);
@@ -84,7 +76,6 @@ io.on('connection', socket => {
     console.log('Socket disconnected:', socket.id);
   });
 });
-
 
 
 // --- Utility Functions ---
