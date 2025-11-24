@@ -65,8 +65,21 @@ app.use(cors({
 // Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Load SSL if available (development friendly)
+let httpsOptions = null;
+try {
+  httpsOptions = {
+    key: fs.readFileSync("ssl/server.key"),
+    cert: fs.readFileSync("ssl/server.cert"),
+  };
+  console.log("SSL options loaded — will create HTTPS server.");
+} catch (err) {
+  console.warn(
+    "SSL files not found or unreadable; continuing without HTTPS (development)."
+  );
+}
 
-// Create HTTP or HTTPS server (keep your SSL detection)
+// Create HTTP or HTTPS server depending on SSL availability
 const server = httpsOptions
   ? https.createServer(httpsOptions, app)
   : http.createServer(app);
