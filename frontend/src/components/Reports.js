@@ -21,7 +21,7 @@ useEffect(() => {
   axios.get(`${BASE_URL}/api/department`)
     .then(res => setDepartments(res.data.map(d => d.department)))
     .catch(() => setDepartments([]));
-}, []);
+}, [BASE_URL]);
 
   const handleDownload = async () => {
     if (type === 'monthly' && (!start || !end)) {

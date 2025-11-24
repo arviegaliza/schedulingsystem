@@ -14,6 +14,18 @@ import cron from "node-cron";
 
 dotenv.config(); // <-- load environment variables first
 
+// Nodemailer transporter
+const transporter = nodemailer.createTransport({
+  service: 'Gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
+  tls: {
+    rejectUnauthorized: false
+  }
+});
+
 // ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
 
@@ -144,17 +156,7 @@ function normalizeParticipants(participants) {
 }
 
 
-// Nodemailer transporter
-const transporter = nodemailer.createTransport({
-  service: 'Gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-});
+
 
 // 1️⃣ Update event statuses (every minute)
 cron.schedule('* * * * *', async () => {
@@ -178,7 +180,10 @@ cron.schedule('* * * * *', async () => {
 // 2️⃣ Delete expired events (daily at midnight)
 cron.schedule('0 0 * * *', async () => {
   try {
-    const sql = `DELETE FROM schedule_events WHERE (end_date + end_time) < NOW()`;
+    const sql = `
+      DELETE FROM schedule_events
+      WHERE (end_date + end_time) < NOW()
+    `;
     const res = await pool.query(sql);
     console.log(`🧹 Deleted ${res.rowCount} expired event(s)`);
   } catch (err) {
@@ -193,7 +198,7 @@ cron.schedule('*/5 * * * *', async () => {
       SELECT id, program AS title, participants, start_date, start_time, notified
       FROM schedule_events
       WHERE (notified = false OR notified IS NULL)
-        AND (start_date + start_time) BETWEEN NOW() AND (NOW() + INTERVAL '1 hour')
+        AND (start_date + start_time::interval) BETWEEN NOW() AND (NOW() + INTERVAL '1 hour')
     `;
     const { rows: events } = await pool.query(sql);
 
@@ -232,6 +237,7 @@ cron.schedule('*/5 * * * *', async () => {
       // Mark event as notified
       await pool.query('UPDATE schedule_events SET notified = true WHERE id = $1', [event.id]);
     }
+
   } catch (err) {
     console.error('❌ Failed to fetch upcoming events for notification:', err.message || err);
   }
