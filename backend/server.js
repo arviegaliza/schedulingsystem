@@ -28,8 +28,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Check required environment variables
 console.log("EMAIL_USER:", process.env.EMAIL_USER);
-console.log("EMAIL_PASS:", process.env.EMAIL_PASS  "***set***" : "***missing***");
+console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "***set***" : "***missing***");
+console.log("DATABASE_URL:", process.env.DATABASE_URL ? "***set***" : "***missing***");
+
 // Create server first
 const server = http.createServer(app);
 
@@ -441,29 +444,7 @@ app.put('/api/categories/:id', async (req, res) => {
       return res.status(403).json({ error: 'You can only edit categories for your own department.' });
     }
 
-    // 3️⃣ Update the category
-    await pool.query(
-      'UPDATE categories SET office = $1, email = $2, department = $3 WHERE id = $4',
-      [office, email, department, id]
-    );
-
-    res.json({ message: 'Category updated successfully' });
-  } catch (err) {
-    console.error('Update Error:', err);
-    res.status(500).json({ error: 'Update failed.' });
-  }
-});
-
-  try {
-    const { rows } = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Category not found.' });
-
-    const catDept = (rows[0].department || '').trim();
-
-    if (userType.toLowerCase() !== 'administrator' && userType.toLowerCase() !== catDept.toLowerCase()) {
-      return res.status(403).json({ error: 'You can only edit categories for your own department.' });
-    }
-
+    // 3️⃣ Update the category and return the updated row
     const sql = 'UPDATE categories SET office = $1, email = $2, department = $3 WHERE id = $4 RETURNING *';
     const { rows: updated } = await pool.query(sql, [office, email, department, id]);
 
