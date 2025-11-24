@@ -23,20 +23,22 @@ function Categories() {
   const departments = ['OSDS', 'SGOD', 'CID'];
   const API_URL = `${process.env.REACT_APP_API_URL}/api/categories`;
 
-  // Memoized fetchCategories
-  const fetchCategories = useCallback(async () => {
-    if (!user) return; // Wait until user is loaded
-    try {
-      setIsLoading(true);
-      const res = await axios.get(`${API_URL}?userType=${user.type}`); // pass userType
-      setCategoryList(res.data);
-    } catch (err) {
-      console.error('Fetch error:', err);
-      toast.error(err.response?.data?.message || 'Failed to fetch categories');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [API_URL, user]);
+const fetchCategories = useCallback(async () => {
+  if (!user) return; // Wait until user is loaded
+  try {
+    setIsLoading(true);
+    const res = await axios.get(`${API_URL}?userType=${user.type}`, {
+      withCredentials: true, // include cookies/session if needed
+    });
+    setCategoryList(res.data);
+  } catch (err) {
+    console.error('Fetch error:', err);
+    toast.error(err.response?.data?.message || 'Failed to fetch categories');
+  } finally {
+    setIsLoading(false);
+  }
+}, [API_URL, user]);
+
 
   // Load user from localStorage
   useEffect(() => {

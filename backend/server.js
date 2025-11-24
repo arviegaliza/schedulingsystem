@@ -23,6 +23,7 @@ const pool = new Pool({
 
 const app = express();
 // ---------- START PASTE HERE (replace current middleware/server/io block) ----------
+// ---------------------- Middleware / CORS / Server ----------------------
 
 // trust reverse proxy (important on Render, Heroku, etc.)
 app.set('trust proxy', true);
@@ -33,27 +34,25 @@ const FRONTEND_ORIGINS = [
   "http://localhost:3000" // dev
 ];
 
-// General CORS middleware (kept simple + safe)
+// General CORS middleware
 app.use((req, res, next) => {
   const origin = req.get('origin');
   if (!origin) {
-    // allow non-browser requests (curl, server-to-server)
+    // allow non-browser requests
     res.header('Access-Control-Allow-Origin', '*');
   } else if (FRONTEND_ORIGINS.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   } else {
-    // optional: you can choose to reject unknown origins instead of silently blocking
     res.header('Access-Control-Allow-Origin', 'null'); 
   }
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  // keep headers for socket.io polling preflight too
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-// Also register CORS via the cors library (keeps compatibility with libraries expecting it)
+// Also register CORS via the cors library
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
@@ -69,50 +68,35 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-
-// Add this BEFORE your `const server = httpsOptions ...` line
-let httpsOptions = null;
-try {
-  httpsOptions = {
-    key: fs.readFileSync("ssl/server.key"),   // make sure path is correct
-    cert: fs.readFileSync("ssl/server.cert"),
-  };
-  console.log("SSL options loaded — HTTPS server will be used.");
-} catch (err) {
-  console.warn("SSL files not found or unreadable; continuing without HTTPS.");
-}
-
-// Create HTTP or HTTPS server (keep your SSL detection)
+// Create HTTP or HTTPS server
 const server = httpsOptions
   ? https.createServer(httpsOptions, app)
   : http.createServer(app);
 
-// Socket.IO server with matching CORS (important!)
+// Socket.IO server with matching CORS
 export const io = new Server(server, {
   cors: {
     origin: FRONTEND_ORIGINS,
     methods: ["GET", "POST"],
     credentials: true
   },
-  // optional: path: '/socket.io' // default is fine unless you changed it client-side
 });
 
-// Ensure socket.io polling endpoints respond to OPTIONS (some proxies require this)
-app.options('/socket.io/*', (req, res) => {
+// Handle all Socket.IO preflight OPTIONS requests (fixed)
+app.options(/\/socket\.io\/.*/, (req, res) => {
   res.header('Access-Control-Allow-Origin', FRONTEND_ORIGINS.join(' '));
   res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.sendStatus(204);
 });
 
-// Simple socket connection logger
+// Socket connection logging
 io.on('connection', socket => {
   console.log('Socket connected:', socket.id);
   socket.on('disconnect', () => {
     console.log('Socket disconnected:', socket.id);
   });
 });
-
 
 
 // --- Utility Functions ---
