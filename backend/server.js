@@ -69,6 +69,19 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+
+// Add this BEFORE your `const server = httpsOptions ...` line
+let httpsOptions = null;
+try {
+  httpsOptions = {
+    key: fs.readFileSync("ssl/server.key"),   // make sure path is correct
+    cert: fs.readFileSync("ssl/server.cert"),
+  };
+  console.log("SSL options loaded — HTTPS server will be used.");
+} catch (err) {
+  console.warn("SSL files not found or unreadable; continuing without HTTPS.");
+}
+
 // Create HTTP or HTTPS server (keep your SSL detection)
 const server = httpsOptions
   ? https.createServer(httpsOptions, app)
