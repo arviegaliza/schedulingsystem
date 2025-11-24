@@ -46,23 +46,6 @@ app.use(cors({
   credentials: true,
 }));
 
-io.on("connection", (socket) => {
-  console.log("New client connected");
-
-  socket.on("disconnect", () => {
-    console.log("Client disconnected");
-  });
-});
-
-// Now you can emit events anywhere if you import `io`
-export const updateStatus = () => {
-  io.emit("statusUpdated"); // this triggers the frontend
-};
-
-server.listen(process.env.PORT || 8081, () =>
-  console.log("Server running")
-);
-
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
