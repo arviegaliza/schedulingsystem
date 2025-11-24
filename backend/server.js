@@ -24,7 +24,7 @@ const options = {
   cert: fs.readFileSync("ssl/server.cert"),
 };
 
-app.use(cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -42,13 +42,11 @@ import { Server } from "socket.io";
 
 
 
-export const io = new Server(server, {
-  cors: {
-    origin: "https://schedulingsystem-ten.vercel.app",
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-});
+app.use(cors({
+  origin: "https://schedulingsystem-ten.vercel.app",
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true,
+}));
 
 io.on("connection", (socket) => {
   console.log("New client connected");
