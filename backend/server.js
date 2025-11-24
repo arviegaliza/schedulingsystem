@@ -11,43 +11,38 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-dotenv.config(); // Load .env
 
-const { Pool } = pkg; // Import Pool for PostgreSQL
+dotenv.config(); // Load .env
+const { Pool } = pkg;
 
 const app = express();
-// ---------- START PASTE HERE (replace current middleware/server/io block) ----------
 
-// trust reverse proxy (important on Render, Heroku, etc.)
-app.set('trust proxy', true);
+// ---------- CORS & Middleware ----------
+app.set('trust proxy', true); // important on Render/Heroku
 
-// Allowed front-end origins
 const FRONTEND_ORIGINS = [
   "https://schedulingsystem-ten.vercel.app",
   "http://localhost:3000" // dev
 ];
 
-// General CORS middleware (kept simple + safe)
+// General CORS
 app.use((req, res, next) => {
   const origin = req.get('origin');
   if (!origin) {
-    // allow non-browser requests (curl, server-to-server)
     res.header('Access-Control-Allow-Origin', '*');
   } else if (FRONTEND_ORIGINS.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   } else {
-    // optional: you can choose to reject unknown origins instead of silently blocking
     res.header('Access-Control-Allow-Origin', 'null'); 
   }
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  // keep headers for socket.io polling preflight too
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-// Also register CORS via the cors library (keeps compatibility with libraries expecting it)
+// CORS via library
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
@@ -63,22 +58,18 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Create HTTP or HTTPS server (keep your SSL detection)
-const server = httpsOptions
-  ? https.createServer(httpsOptions, app)
-  : http.createServer(app);
+// ---------- HTTP Server ----------
+const server = http.createServer(app); // simplified, no httpsOptions needed
 
-// Socket.IO server with matching CORS (important!)
+// ---------- Socket.IO ----------
 export const io = new Server(server, {
   cors: {
     origin: FRONTEND_ORIGINS,
     methods: ["GET", "POST"],
     credentials: true
   },
-  // optional: path: '/socket.io' // default is fine unless you changed it client-side
 });
 
-// Ensure socket.io polling endpoints respond to OPTIONS (some proxies require this)
 app.options('/socket.io/*', (req, res) => {
   res.header('Access-Control-Allow-Origin', FRONTEND_ORIGINS.join(' '));
   res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
