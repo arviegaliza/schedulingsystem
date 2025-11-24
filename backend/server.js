@@ -11,94 +11,82 @@ import crypto from "crypto";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
-dotenv.config(); // <-- load environment variables first
+dotenv.config();
 
-// ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL, // make sure this exists in .env
-  ssl: { rejectUnauthorized: false } // optional, needed for Render/Heroku
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // needed for Render/Postgres SSL
 });
 
 const app = express();
-// ---------- START PASTE HERE (replace current middleware/server/io block) ----------
-// ---------------------- Middleware / CORS / Server ----------------------
 
-// trust reverse proxy (important on Render, Heroku, etc.)
+// --------- TRUST PROXY & BODY PARSERS ----------
 app.set('trust proxy', true);
-
-// Allowed front-end origins
-const FRONTEND_ORIGINS = [
-  "https://schedulingsystem-ten.vercel.app",
-  "http://localhost:3000" // dev
-];
-
-// General CORS middleware
-app.use((req, res, next) => {
-  const origin = req.get('origin');
-  if (!origin) {
-    // allow non-browser requests
-    res.header('Access-Control-Allow-Origin', '*');
-  } else if (FRONTEND_ORIGINS.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  } else {
-    res.header('Access-Control-Allow-Origin', 'null'); 
-  }
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
-
-// Also register CORS via the cors library
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    if (FRONTEND_ORIGINS.indexOf(origin) !== -1) return cb(null, true);
-    cb(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-Requested-With','Accept']
-}));
-
-// Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Create HTTP or HTTPS server
+// --------- FRONTEND ORIGINS ----------
+const FRONTEND_ORIGINS = [
+  "https://schedulingsystem-ten.vercel.app",
+  "http://localhost:3000"
+];
+
+// --------- CORS MIDDLEWARE ----------
+app.use(cors({
+  origin: FRONTEND_ORIGINS,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+}));
+
+// Make sure all responses include CORS headers
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", FRONTEND_ORIGINS.join(","));
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  next();
+});
+
+// --------- SSL / HTTP SERVER ----------
+let httpsOptions = null;
+try {
+  httpsOptions = {
+    key: fs.readFileSync("ssl/server.key"),
+    cert: fs.readFileSync("ssl/server.cert"),
+  };
+  console.log("SSL loaded — HTTPS server will be used.");
+} catch (err) {
+  console.warn("SSL not found, using HTTP.");
+}
+
 const server = httpsOptions
   ? https.createServer(httpsOptions, app)
   : http.createServer(app);
 
-// Socket.IO server with matching CORS
+// --------- SOCKET.IO ----------
 export const io = new Server(server, {
   cors: {
     origin: FRONTEND_ORIGINS,
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
   },
 });
 
-// Handle all Socket.IO preflight OPTIONS requests (fixed)
+// --------- SOCKET.IO CONNECTION ----------
+io.on("connection", (socket) => {
+  console.log("Socket connected:", socket.id);
+  socket.on("disconnect", () => console.log("Socket disconnected:", socket.id));
+});
+
+// --------- OPTIONS for Socket.IO preflight ----------
 app.options(/\/socket\.io\/.*/, (req, res) => {
-  res.header('Access-Control-Allow-Origin', FRONTEND_ORIGINS.join(' '));
-  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header("Access-Control-Allow-Origin", FRONTEND_ORIGINS.join(","));
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.sendStatus(204);
 });
-
-// Socket connection logging
-io.on('connection', socket => {
-  console.log('Socket connected:', socket.id);
-  socket.on('disconnect', () => {
-    console.log('Socket disconnected:', socket.id);
-  });
-});
-
-
 // --- Utility Functions ---
 /**
  * Safely parse JSON strings. Returns fallback (default []) if parsing fails.
