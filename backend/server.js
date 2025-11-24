@@ -36,8 +36,7 @@ console.log("DATABASE_URL:", process.env.DATABASE_URL ? "***set***" : "***missin
 // Create server first
 const server = http.createServer(app);
 
-import express from "express";
-import { createServer } from "http";
+
 import { Server } from "socket.io";
 
 
