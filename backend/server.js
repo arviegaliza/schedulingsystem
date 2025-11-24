@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import fs from "fs";
-import http from "http";
+import https from "https";
 import { Server } from "socket.io";
 import pkg from "pg"; // PostgreSQL
 import jwt from "jsonwebtoken";
