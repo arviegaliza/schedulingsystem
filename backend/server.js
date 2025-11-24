@@ -36,12 +36,36 @@ console.log("DATABASE_URL:", process.env.DATABASE_URL ? "***set***" : "***missin
 // Create server first
 const server = http.createServer(app);
 
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
 
-app.use(cors({
-  origin: 'https://schedulingsystem-ten.vercel.app',
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  credentials: true
-}));
+
+
+export const io = new Server(server, {
+  cors: {
+    origin: "https://schedulingsystem-ten.vercel.app",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+io.on("connection", (socket) => {
+  console.log("New client connected");
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected");
+  });
+});
+
+// Now you can emit events anywhere if you import `io`
+export const updateStatus = () => {
+  io.emit("statusUpdated"); // this triggers the frontend
+};
+
+server.listen(process.env.PORT || 8081, () =>
+  console.log("Server running")
+);
 
 
 const pool = new Pool({
