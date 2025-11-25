@@ -21,38 +21,7 @@ dotenv.config(); // <-- load environment variables first
 // use a verified sender in your SendGrid account
 const FROM_EMAIL = process.env.EMAIL_USER || 'arbgaliza@gmail.com';
 
-async function debugSendMail(msg) {
-  try {
-    const response = await sgMail.send(msg); // Note: returns array for successful sends
-    console.log('SendGrid send response:', response && response.length ? response[0].statusCode : response);
-    return { ok: true, response };
-  } catch (err) {
-    console.error('=== SendGrid send ERROR ===');
-    console.error('Error:', err && err.message ? err.message : err);
-    if (err.response) {
-      console.error('err.response.statusCode:', err.response.statusCode);
-      console.error('err.response.headers:', err.response.headers);
-      console.error('err.response.body:', JSON.stringify(err.response.body, null, 2));
-    } else {
-      console.error('No err.response object present (network / auth issue)');
-    }
-    return { ok: false, error: err, response: err.response };
-  }
-}
 
-// Example usage inside your route:
-const msg = {
-  to: email,
-  from: FROM_EMAIL,
-  subject: 'Your OTP Code',
-  text: `Your OTP is ${otp}. It expires in 10 minutes.`,
-};
-
-const result = await debugSendMail(msg);
-if (!result.ok) {
-  // return a useful response for the front-end and keep detailed logs server-side
-  return res.status(500).json({ success: false, message: 'Failed to send OTP. Check server logs for details.' });
-}
 // ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
 
@@ -281,10 +250,11 @@ cron.schedule('0 0 * * 0', async () => {
   }
 });
 
-// ------------------ SEND OTP ------------------
 app.post("/api/forgot-password", async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+  const { email, new_password } = req.body;
+  if (!email || !new_password) {
+    return res.status(400).json({ success: false, message: "Email and new password are required" });
+  }
 
   try {
     // Check if user exists
@@ -293,88 +263,68 @@ app.post("/api/forgot-password", async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
-
-    // Save OTP in database
+    // Update password directly
     await pool.query(
-      "UPDATE users SET otp_code = $1, otp_expires = $2 WHERE email = $3",
-      [otp, otpExpires, email]
-    );
-
-    // Send OTP via SendGrid
-    const msg = {
-      to: email,
-      from: process.env.EMAIL_USER, // your verified Gmail or SendGrid sender
-      subject: "Your OTP Code",
-      text: `Your OTP code is ${otp}. It expires in 10 minutes.`,
-    };
-
-    await sgMail.send(msg);
-
-    res.json({ success: true, message: "OTP sent to your email" });
-  } catch (err) {
-    console.error("Failed to send OTP:", err);
-    res.status(500).json({ success: false, message: "Failed to send OTP" });
-  }
-});
-
-// ------------------ VERIFY OTP ------------------
-app.post("/api/verify-otp", async (req, res) => {
-  const { email, otp_code } = req.body;
-  if (!email || !otp_code) return res.status(400).json({ success: false, message: "Email and OTP are required" });
-
-  try {
-    const result = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND otp_code = $2 AND otp_expires > NOW()",
-      [email, otp_code]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
-    }
-
-    res.json({ success: true, message: "OTP verified" });
-  } catch (err) {
-    console.error("Error verifying OTP:", err);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-app.post("/api/reset-password", async (req, res) => {
-  const { email, otp_code, new_password } = req.body;
-  if (!email || !otp_code || !new_password) return res.status(400).json({ success: false, message: "All fields are required" });
-
-  try {
-    // Verify OTP again
-    const result = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND otp_code = $2 AND otp_expires > NOW()",
-      [email, otp_code]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
-    }
-
-    // Update password and clear OTP
-    await pool.query(
-      "UPDATE users SET password = $1, otp_code = NULL, otp_expires = NULL WHERE email = $2",
+      "UPDATE users SET password = $1 WHERE email = $2",
       [new_password, email]
     );
-
-    // Optional: send confirmation email
-    const msg = {
-      to: email,
-      from: process.env.EMAIL_USER,
-      subject: "Password Changed",
-      text: `Hello, your password has been successfully changed. If you did not request this, contact support immediately.`,
-    };
-    await sgMail.send(msg);
 
     res.json({ success: true, message: "Password reset successfully" });
   } catch (err) {
     console.error("Error resetting password:", err);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ------------------ RESET PASSWORD (NO OTP) ------------------
+app.post("/api/reset-password", async (req, res) => {
+  const { email, new_password } = req.body || {};
+  if (!email || !new_password) {
+    return res.status(400).json({ success: false, message: "Email and new_password are required." });
+  }
+
+  try {
+    // Normalize email and check user exists (case-insensitive)
+    const normalizedEmail = email.trim().toLowerCase();
+    const userResult = await pool.query(
+      "SELECT id, email FROM users WHERE LOWER(email) = $1 LIMIT 1",
+      [normalizedEmail]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    const user = userResult.rows[0];
+
+    // WARNING: This stores plaintext passwords. Replace with hashed passwords later.
+    await pool.query(
+      "UPDATE users SET password = $1 WHERE id = $2",
+      [new_password, user.id]
+    );
+
+    // Optional: send confirmation email (non-blocking)
+    if (typeof sgMail !== 'undefined' && process.env.EMAIL_USER) {
+      const msg = {
+        to: user.email,
+        from: process.env.EMAIL_USER,
+        subject: "Password Changed",
+        text: `Hello ${user.email},\n\nYour password has been successfully changed. If you did not request this change, please contact support immediately.`,
+      };
+
+      try {
+        await sgMail.send(msg);
+        console.log("Password change confirmation sent to", user.email);
+      } catch (emailErr) {
+        console.error("Failed to send password change confirmation:", emailErr);
+        // do not fail the request because email failed
+      }
+    }
+
+    return res.json({ success: true, message: "Password updated successfully." });
+  } catch (err) {
+    console.error("Error in /api/reset-password:", err && err.stack ? err.stack : err);
+    return res.status(500).json({ success: false, message: "Internal server error." });
   }
 });
 

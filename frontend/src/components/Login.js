@@ -8,13 +8,11 @@ import backgroundLogin from '../assets/backgroundlogin.png';
 function Login() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [step, setStep] = useState(1);
 
   const [employee_number, setEmployeeNumber] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [otp, setOtp] = useState('');
   const [type, setType] = useState('');
 
   const [error, setError] = useState('');
@@ -22,16 +20,16 @@ function Login() {
 
   const navigate = useNavigate();
 
+  // LOGIN
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
-    try {
-const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/login`, {
-  employee_number,
-  password
-});
 
-      
+    try {
+      const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/login`, {
+        employee_number,
+        password
+      });
 
       const user = res.data.user || res.data;
       if (!user || !user.type) {
@@ -42,14 +40,14 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/login`, {
       localStorage.setItem('user', JSON.stringify(user));
       navigate('/dashboard/home');
     } catch (err) {
-      if (err.response?.status === 401) {
-        setError('Invalid employee number or password.');
-      } else {
-        setError('Login failed. Server error.');
-      }
+      setError(err.response?.status === 401
+        ? 'Invalid employee number or password.'
+        : 'Login failed. Server error.'
+      );
     }
   };
 
+  // REGISTER
   const handleRegister = async (e) => {
     e.preventDefault();
     setError('');
@@ -59,19 +57,19 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/login`, {
       setError('Employee number must be 7 digits');
       return;
     }
+
     if (!email.includes('@')) {
-      setError('Enter a valid email address');
+      setError('Enter a valid email');
       return;
     }
 
     try {
-const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
-  employee_number,
-  email,
-  password,
-  type
-});
-
+      const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
+        employee_number,
+        email,
+        password,
+        type
+      });
 
       if (res.data.success) {
         setSuccess('Registration successful! You can now login.');
@@ -88,57 +86,16 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
     }
   };
 
-  const handleForgotStep1 = async (e) => {
+  // FORGOT PASSWORD (NO OTP)
+  const handleForgotPassword = async (e) => {
     e.preventDefault();
     setError('');
     setSuccess('');
 
     if (!email.includes('@')) {
-      setError('Please enter a valid email address.');
+      setError('Enter a valid email.');
       return;
     }
-
-  try {
-  const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/forgot-password`, { email });
-  if (res.data.success) {
-    setSuccess('OTP sent to your email.');
-    setStep(2);
-  } else {
-    setError(res.data.message || 'Failed to send OTP.');
-  }
-} catch (err) {
-  setError(err.response?.data?.message || 'Server error.');
-}
-};
-  const handleForgotStep2 = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-
-    try {
-  console.log("Verifying OTP using:", `${process.env.REACT_APP_API_URL}/api/verify-otp`);
-
-  const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/verify-otp`, { 
-    email, 
-    otp_code: otp 
-  });
-
-  if (res.data.success) {
-    setSuccess('OTP verified. Set your new password.');
-    setStep(3);
-  } else {
-    setError(res.data.message || 'OTP verification failed.');
-  }
-} catch (err) {
-  console.error("OTP verification error:", err.response?.data || err.message);
-  setError(err.response?.data?.message || 'Server error.');
-}
-  };
-
-  const handleForgotStep3 = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
 
     if (password !== confirmPassword) {
       setError('Passwords do not match.');
@@ -146,28 +103,23 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
     }
 
     try {
-  console.log("Resetting password using:", `${process.env.REACT_APP_API_URL}/api/reset-password`);
+      const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-password`, {
+        email,
+        new_password: password
+      });
 
-  const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-password`, {
-    email,
-    otp_code: otp,
-    new_password: password
-  });
-
-  if (res.data.success) {
-    setSuccess('Password reset successful. Please login.');
-    setStep(1);
-    setIsForgotPassword(false);
-    setEmail('');
-    setPassword('');
-    setOtp('');
-  } else {
-    setError(res.data.message || 'Failed to reset password.');
-  }
-} catch (err) {
-  console.error("Reset password error:", err.response?.data || err.message);
-  setError(err.response?.data?.message || 'Server error.');
-}
+      if (res.data.success) {
+        setSuccess('Password reset successful! You can now login.');
+        setIsForgotPassword(false);
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+      } else {
+        setError(res.data.message || 'Failed to reset password.');
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Server error.');
+    }
   };
 
   return (
@@ -178,51 +130,32 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
           isRegistering
             ? handleRegister
             : isForgotPassword
-              ? step === 1
-                ? handleForgotStep1
-                : step === 2
-                  ? handleForgotStep2
-                  : handleForgotStep3
+              ? handleForgotPassword
               : handleLogin
         }
       >
-        {/* Title left, logo centered below, professional spacing, no overlap */}
-        <div style={{ width: '100%' }}>
-          <h2 style={{ textAlign: 'left', margin: 0, fontWeight: 700 }}>
-            {isRegistering
-              ? 'Register'
-              : isForgotPassword
-                ? step === 1
-                  ? 'Forgot Password'
-                  : step === 2
-                    ? 'Verify OTP'
-                    : 'Reset Password'
-                : 'Login'}
-          </h2>
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <h2>
+          {isRegistering
+            ? 'Register'
+            : isForgotPassword
+              ? 'Reset Password'
+              : 'Login'}
+        </h2>
+
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
           <img
-  src={backgroundLogin}
-  alt="Login Background"
-  className="login-bg-image"
-  style={{ 
-    width: '100px',
-    height: 'auto', // Maintain aspect ratio
-    aspectRatio: '1', // Optional: Force square if needed
-    borderRadius: '4px',
-    display: 'block',
-    marginTop: '12px',
-    objectFit: 'cover' // Ensures image fills space while maintaining ratio
-  }}
-  loading="eager" // Force immediate load
-  decoding="sync" // Force synchronous decoding
-  onError={(e) => {
-    e.target.style.display = 'none'; // Hide if fails to load
-    console.error('Failed to load login background image');
-  }}
-/>
-          </div>
+            src={backgroundLogin}
+            alt="Login Background"
+            className="login-bg-image"
+            style={{
+              width: '100px',
+              height: 'auto',
+              borderRadius: '4px',
+              marginTop: '12px',
+              objectFit: 'cover'
+            }}
+          />
         </div>
-        {/* Inputs start here */}
 
         {error && <div className="error">{error}</div>}
         {success && <div className="success">{success}</div>}
@@ -237,7 +170,7 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
           />
         )}
 
-        {(isRegistering || (isForgotPassword && step === 1)) && (
+        {(isRegistering || isForgotPassword) && (
           <input
             type="email"
             placeholder="Email Address"
@@ -247,32 +180,30 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
           />
         )}
 
-        {isForgotPassword && step === 2 && (
-          <input
-            type="text"
-            placeholder="Enter OTP"
-            value={otp}
-            onChange={(e) => setOtp(e.target.value)}
-            required
-          />
-        )}
+        {isForgotPassword ? (
+          <>
+            <input
+              type="password"
+              placeholder="New Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
 
-        {(!isForgotPassword || step === 3) && (
+            <input
+              type="password"
+              placeholder="Confirm Password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </>
+        ) : (
           <input
             type="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        )}
-
-        {isForgotPassword && step === 3 && (
-          <input
-            type="password"
-            placeholder="Confirm Password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
             required
           />
         )}
@@ -291,11 +222,7 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
           {isRegistering
             ? 'Register'
             : isForgotPassword
-              ? step === 1
-                ? 'Send OTP'
-                : step === 2
-                  ? 'Verify OTP'
-                  : 'Reset Password'
+              ? 'Reset Password'
               : 'Login'}
         </button>
 
@@ -322,7 +249,6 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
                 type="button"
                 onClick={() => {
                   setIsForgotPassword(false);
-                  setStep(1);
                   setError('');
                   setSuccess('');
                 }}
@@ -356,7 +282,6 @@ const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
                 type="button"
                 onClick={() => {
                   setIsForgotPassword(true);
-                  setStep(1);
                   setError('');
                   setSuccess('');
                 }}
