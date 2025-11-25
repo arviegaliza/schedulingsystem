@@ -26,6 +26,20 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+const msg = {
+  to: email, // recipient
+  from: 'no-reply@schedulingsystem.com', // verified sender in SendGrid
+  subject: 'Your OTP Code',
+  text: `Your OTP is ${otp}. It expires in 10 minutes.`,
+};
+
+try {
+  await sgMail.send(msg);
+  console.log('OTP sent via SendGrid API');
+} catch (err) {
+  console.error('Failed to send OTP via SendGrid API:', err);
+}
+
 // ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
 
