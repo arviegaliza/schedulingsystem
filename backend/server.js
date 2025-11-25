@@ -454,7 +454,30 @@ app.delete('/api/categories/:id', async (req, res) => {
   }
 });
 
-// GET all events
+// Helpers
+function safeJSONParse(value, fallback = []) {
+  if (!value) return fallback;
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [value];
+  }
+}
+
+function normalizeParticipants(participants) {
+  if (!participants) return [];
+  if (Array.isArray(participants)) return participants.map(String);
+  try {
+    const parsed = JSON.parse(participants);
+    return Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+  } catch {
+    return [String(participants)];
+  }
+}
+
+// GET all events for frontend
 app.get('/api/events', async (req, res) => {
   try {
     const sql = `
@@ -465,24 +488,19 @@ app.get('/api/events', async (req, res) => {
         TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
         purpose, participants, department, status
       FROM schedule_events
+      ORDER BY start_date, start_time
     `;
     const { rows } = await pool.query(sql);
 
     const events = rows.map(event => {
-      const participants = safeJSONParse(event.participants);
+      const participants = normalizeParticipants(event.participants);
       const department = safeJSONParse(event.department);
 
-      // Combine date and time into ISO string
-      const start = new Date(`${event.start_date}T${event.start_time}`);
-      const end = new Date(`${event.end_date}T${event.end_time}`);
+      // Combine date + time for calendar
+      const start = event.start_date && event.start_time ? new Date(`${event.start_date}T${event.start_time}`) : null;
+      const end = event.end_date && event.end_time ? new Date(`${event.end_date}T${event.end_time}`) : null;
 
-      return {
-        ...event,
-        participants,
-        department,
-        start,
-        end
-      };
+      return { ...event, participants, department, start, end };
     });
 
     res.json(events);
@@ -492,18 +510,11 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-// POST /api/events
+// POST /api/events - Add new event
 app.post('/api/events', async (req, res) => {
   const {
-    program,
-    start_date,
-    start_time,
-    end_date,
-    end_time,
-    purpose,
-    participants,
-    department,
-    created_by
+    program, start_date, start_time, end_date, end_time,
+    purpose, participants, department, created_by
   } = req.body;
 
   // Validate required fields
@@ -524,13 +535,12 @@ app.post('/api/events', async (req, res) => {
         (start_date || ' ' || start_time) >= $2
       )
     `;
-    const conflictParams = [newStart, newEnd];
-    const conflictResult = await pool.query(conflictQuery, conflictParams);
+    const conflictResult = await pool.query(conflictQuery, [newStart, newEnd]);
 
-    // Check for participant/office conflict
+    // Check participant conflicts
     const hasConflict = conflictResult.rows.some(event => {
       const eventParticipants = normalizeParticipants(event.participants);
-      return eventParticipants.some(p => payloadParticipants.includes(p));
+      return payloadParticipants.some(p => eventParticipants.includes(p));
     });
 
     if (hasConflict) {
@@ -539,7 +549,7 @@ app.post('/api/events', async (req, res) => {
       });
     }
 
-    // Insert the new event
+    // Insert new event
     const insertQuery = `
       INSERT INTO schedule_events
         (program, start_date, start_time, end_date, end_time, purpose, participants, department, status, created_by)
@@ -548,15 +558,8 @@ app.post('/api/events', async (req, res) => {
       RETURNING id
     `;
     const insertParams = [
-      program,
-      start_date,
-      start_time,
-      end_date,
-      end_time,
-      purpose,
-      JSON.stringify(participants),
-      JSON.stringify(department),
-      created_by
+      program, start_date, start_time, end_date, end_time,
+      purpose, JSON.stringify(participants), JSON.stringify(department), created_by
     ];
 
     const insertResult = await pool.query(insertQuery, insertParams);
