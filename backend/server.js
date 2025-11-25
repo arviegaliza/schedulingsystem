@@ -668,66 +668,78 @@ function getDateFilter(start, end) {
   if (end) filter += ` AND end_date <= '${end}'`;
   return filter;
 }
-
 // Middleware to check admin or department access
 function checkReportAccess(req, res, next) {
-  // For demo: get user type from query (in real app, use auth)
   const userType = req.query.userType || 'Administrator';
   req.userType = userType;
   next();
 }
+
 app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
   const { department = 'All', start, end, format = 'xlsx' } = req.query;
   const { type } = req.params;
   const userType = req.userType || 'Administrator';
 
   try {
-    if (!start || !end) {
-      return res.status(400).json({ error: 'Start and end dates are required.' });
-    }
+    if (!start || !end) return res.status(400).json({ error: 'Start and end dates are required.' });
 
     const startMonth = Number(start);
     const endYear = Number(end);
+
     if (type === 'monthly' && (isNaN(startMonth) || isNaN(endYear) || startMonth < 1 || startMonth > 12)) {
       return res.status(400).json({ error: 'Invalid month or year.' });
     }
 
-    // Fetch categories
-    const categoriesQuery = `SELECT * FROM categories WHERE 1=1 ${getDepartmentFilter(department, userType, 'categories')}`;
-    const categories = (await pool.query(categoriesQuery)).rows;
+    // ---------------- Fetch Categories ----------------
+    let categoryQuery = 'SELECT * FROM categories';
+    const categoryParams = [];
+    if (department !== 'All') {
+      categoryQuery += ' WHERE department = $1';
+      categoryParams.push(department);
+    }
+    const categories = (await pool.query(categoryQuery, categoryParams)).rows;
 
-    // Fetch users
-    const usersQuery = 'SELECT id, employee_number, email, type FROM users WHERE 1=1' +
-                       (department !== 'All' ? ' AND type = $1' : '');
-    const users = (await pool.query(usersQuery, department !== 'All' ? [department] : [])).rows;
+    // ---------------- Fetch Users ----------------
+    let usersQuery = 'SELECT id, employee_number, email, type FROM users';
+    const userParams = [];
+    if (department !== 'All') {
+      usersQuery += ' WHERE type = $1';
+      userParams.push(department);
+    }
+    const users = (await pool.query(usersQuery, userParams)).rows;
 
-    // Fetch events safely
+    // ---------------- Fetch Events ----------------
     let events = [];
     if (type === 'monthly') {
-      const eventsQuery = `
-        SELECT * FROM schedule_events
-        WHERE 1=1
-          ${getDepartmentFilter(department, userType, 'events')}
-          AND start_date IS NOT NULL
-          AND EXTRACT(MONTH FROM start_date) = $1
-          AND EXTRACT(YEAR FROM start_date) = $2
-      `;
-      events = (await pool.query(eventsQuery, [startMonth, endYear])).rows;
+      let eventsQuery = 'SELECT * FROM schedule_events WHERE start_date IS NOT NULL';
+      const eventParams = [];
+
+      if (department !== 'All') {
+        eventsQuery += ' AND department = $1';
+        eventParams.push(department);
+      }
+
+      eventsQuery += ` AND EXTRACT(MONTH FROM start_date) = $${eventParams.length + 1} AND EXTRACT(YEAR FROM start_date) = $${eventParams.length + 2}`;
+      eventParams.push(startMonth, endYear);
+
+      events = (await pool.query(eventsQuery, eventParams)).rows;
     } else {
-      const eventsQuery = `
-        SELECT * FROM schedule_events
-        WHERE 1=1
-          ${getDepartmentFilter(department, userType, 'events')}
-          ${getDateFilter(start, end)}
-      `;
-      events = (await pool.query(eventsQuery)).rows;
+      // weekly report
+      let eventsQuery = 'SELECT * FROM schedule_events WHERE start_date BETWEEN $1 AND $2';
+      const eventParams = [start, end];
+
+      if (department !== 'All') {
+        eventsQuery += ' AND department = $3';
+        eventParams.push(department);
+      }
+
+      events = (await pool.query(eventsQuery, eventParams)).rows;
     }
 
-    // Prepare XLSX
+    // ---------------- Export XLSX ----------------
     if (format === 'xlsx') {
       const workbook = new ExcelJS.Workbook();
 
-      // Categories sheet
       const catSheet = workbook.addWorksheet('Categories');
       catSheet.columns = [
         { header: 'ID Number', key: 'idnumber' },
@@ -737,7 +749,6 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
       ];
       categories.forEach(row => catSheet.addRow(row));
 
-      // Users sheet
       const userSheet = workbook.addWorksheet('Users');
       userSheet.columns = [
         { header: 'ID', key: 'id' },
@@ -747,7 +758,6 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
       ];
       users.forEach(row => userSheet.addRow(row));
 
-      // Events sheet
       const eventSheet = workbook.addWorksheet('Events');
       eventSheet.columns = [
         { header: 'ID', key: 'id' },
@@ -767,7 +777,7 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
       const officeMap = {};
       categories.forEach(cat => { if (cat.office) officeMap[cat.office] = cat.office; });
 
-      const formatParticipants = (participants) => {
+      const formatParticipants = participants => {
         if (!participants) return '';
         if (Array.isArray(participants)) return participants.join(', ');
         try {
@@ -798,11 +808,9 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
         events.forEach(ev => {
           doc.moveDown(0.5);
           doc.fontSize(12).text(`Program: ${ev.program || ''}`);
-          const startDate = ev.start_date ? new Date(ev.start_date).toLocaleDateString('en-PH') : '';
-          const endDate = ev.end_date ? new Date(ev.end_date).toLocaleDateString('en-PH') : '';
-          doc.text(`Start Date: ${startDate}`);
-          doc.text(`End Date: ${endDate}`);
-          doc.text(`Department: ${Array.isArray(ev.department) ? ev.department.join(', ') : ev.department || ''}`);
+          doc.text(`Start Date: ${ev.start_date ? new Date(ev.start_date).toLocaleDateString('en-PH') : ''}`);
+          doc.text(`End Date: ${ev.end_date ? new Date(ev.end_date).toLocaleDateString('en-PH') : ''}`);
+          doc.text(`Department: ${ev.department || ''}`);
           doc.text(`Participants: ${Array.isArray(ev.participants) ? ev.participants.join(', ') : ev.participants || ''}`);
           doc.text(`Status: ${ev.status || ''}`);
           doc.moveDown(0.5);
@@ -811,16 +819,16 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
       }
 
       doc.end();
-
     } else {
       res.status(400).json({ error: 'Invalid format' });
     }
 
   } catch (err) {
-    console.error('Report error:', err.stack); // logs exact PostgreSQL error
+    console.error('Report error:', err.stack);
     res.status(500).json({ error: 'Failed to generate report' });
   }
 });
+
 
 // Get all users
 app.get('/api/users', async (req, res) => {
