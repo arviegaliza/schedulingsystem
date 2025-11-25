@@ -21,24 +21,37 @@ dotenv.config(); // <-- load environment variables first
 // use a verified sender in your SendGrid account
 const FROM_EMAIL = process.env.EMAIL_USER || 'arbgaliza@gmail.com';
 
-async function sendOtpEmail(email, otp) {
-  const msg = {
-    to: email,
-    from: FROM_EMAIL,
-    subject: 'Your OTP Code',
-    text: `Your OTP is ${otp}. It expires in 10 minutes.`,
-  };
-
+async function debugSendMail(msg) {
   try {
-    await sgMail.send(msg);
-    console.log('OTP sent via SendGrid API');
-    return true;
+    const response = await sgMail.send(msg); // Note: returns array for successful sends
+    console.log('SendGrid send response:', response && response.length ? response[0].statusCode : response);
+    return { ok: true, response };
   } catch (err) {
-    console.error('Failed to send OTP via SendGrid API:', err);
-    // if err.response exists it contains details
-    if (err.response) console.error('SendGrid response:', err.response.body);
-    return false;
+    console.error('=== SendGrid send ERROR ===');
+    console.error('Error:', err && err.message ? err.message : err);
+    if (err.response) {
+      console.error('err.response.statusCode:', err.response.statusCode);
+      console.error('err.response.headers:', err.response.headers);
+      console.error('err.response.body:', JSON.stringify(err.response.body, null, 2));
+    } else {
+      console.error('No err.response object present (network / auth issue)');
+    }
+    return { ok: false, error: err, response: err.response };
   }
+}
+
+// Example usage inside your route:
+const msg = {
+  to: email,
+  from: FROM_EMAIL,
+  subject: 'Your OTP Code',
+  text: `Your OTP is ${otp}. It expires in 10 minutes.`,
+};
+
+const result = await debugSendMail(msg);
+if (!result.ok) {
+  // return a useful response for the front-end and keep detailed logs server-side
+  return res.status(500).json({ success: false, message: 'Failed to send OTP. Check server logs for details.' });
 }
 // ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
