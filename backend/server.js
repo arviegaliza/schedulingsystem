@@ -159,14 +159,13 @@ function normalizeParticipants(participants) {
 
 
 
-// 1️⃣ Update event statuses (every minute)
 cron.schedule('* * * * *', async () => {
   try {
     const sql = `
       UPDATE schedule_events
       SET status = CASE
-        WHEN NOW() BETWEEN (start_date + start_time) AND (end_date + end_time) THEN 'active'
-        WHEN NOW() > (end_date + end_time) THEN 'ended'
+        WHEN NOW() BETWEEN (start_date + start_time::interval) AND (end_date + end_time::interval) THEN 'active'
+        WHEN NOW() > (end_date + end_time::interval) THEN 'ended'
         ELSE 'upcoming'
       END
     `;
@@ -177,6 +176,7 @@ cron.schedule('* * * * *', async () => {
     console.error('❌ Failed to update statuses:', err.message || err);
   }
 });
+
 
 // 2️⃣ Delete expired events (daily at midnight)
 cron.schedule('0 0 * * *', async () => {
@@ -454,17 +454,6 @@ app.delete('/api/categories/:id', async (req, res) => {
   }
 });
 
-// Helpers
-function safeJSONParse(value, fallback = []) {
-  if (!value) return fallback;
-  if (Array.isArray(value)) return value;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    return [value];
-  }
-}
 
 function normalizeParticipants(participants) {
   if (!participants) return [];
@@ -510,34 +499,77 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-// POST /api/events - Add new event
+// 1️⃣ GET all events
+app.get('/api/events', async (req, res) => {
+  try {
+    const sql = `
+      SELECT id, program,
+        start_date,
+        TO_CHAR(start_time, 'HH24:MI:SS') AS start_time,
+        end_date,
+        TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
+        purpose, participants, department, status
+      FROM schedule_events
+      ORDER BY start_date, start_time
+    `;
+    const { rows } = await pool.query(sql);
+
+    const events = rows.map(event => {
+      const participants = normalizeParticipants(event.participants);
+      const department = safeJSONParse(event.department);
+
+      const start = event.start_date && event.start_time
+        ? `${event.start_date}T${event.start_time}`  // ISO string, local time
+        : null;
+      const end = event.end_date && event.end_time
+        ? `${event.end_date}T${event.end_time}`
+        : null;
+
+      return { 
+        id: event.id,
+        title: event.program,
+        start,
+        end,
+        color: event.status === 'active' ? 'green'
+              : event.status === 'upcoming' ? 'blue'
+              : 'gray',
+        extendedProps: { purpose: event.purpose, participants, department, status: event.status }
+      };
+    });
+
+    res.json(events);
+  } catch (err) {
+    console.error('Fetch events error:', err);
+    res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
+
+// 2️⃣ POST add new event
 app.post('/api/events', async (req, res) => {
   const {
     program, start_date, start_time, end_date, end_time,
     purpose, participants, department, created_by
   } = req.body;
 
-  // Validate required fields
   if (!program || !start_date || !start_time || !end_date || !end_time || !purpose || !participants?.length || !department?.length) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
-  const newStart = `${start_date} ${start_time}`;
-  const newEnd = `${end_date} ${end_time}`;
+  const newStart = `${start_date}T${start_time}`;
+  const newEnd = `${end_date}T${end_time}`;
   const payloadParticipants = normalizeParticipants(participants);
 
   try {
-    // Check for overlapping events
+    // Check for overlapping events (timestamp-safe)
     const conflictQuery = `
       SELECT * FROM schedule_events
       WHERE NOT (
-        (end_date || ' ' || end_time) <= $1 OR
-        (start_date || ' ' || start_time) >= $2
+        (start_date || 'T' || start_time)::timestamp >= $2::timestamp OR
+        (end_date || 'T' || end_time)::timestamp <= $1::timestamp
       )
     `;
     const conflictResult = await pool.query(conflictQuery, [newStart, newEnd]);
 
-    // Check participant conflicts
     const hasConflict = conflictResult.rows.some(event => {
       const eventParticipants = normalizeParticipants(event.participants);
       return payloadParticipants.some(p => eventParticipants.includes(p));
@@ -563,6 +595,10 @@ app.post('/api/events', async (req, res) => {
     ];
 
     const insertResult = await pool.query(insertQuery, insertParams);
+
+    // Emit socket.io update
+    io.emit('eventAdded', { eventId: insertResult.rows[0].id });
+
     res.status(201).json({
       message: 'Event added successfully',
       eventId: insertResult.rows[0].id
