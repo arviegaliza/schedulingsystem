@@ -19,7 +19,7 @@ dotenv.config(); // <-- load environment variables first
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.sendgrid.net',
-  port: 587,
+  port: 2525,
   auth: {
     user: 'apikey', // fixed value for SendGrid
     pass: process.env.SENDGRID_API_KEY
