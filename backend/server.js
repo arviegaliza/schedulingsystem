@@ -17,29 +17,29 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 dotenv.config(); // <-- load environment variables first
 
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.sendgrid.net',
-  port: 2525,
-  auth: {
-    user: 'apikey', // fixed value for SendGrid
-    pass: process.env.SENDGRID_API_KEY
+
+// use a verified sender in your SendGrid account
+const FROM_EMAIL = process.env.EMAIL_USER || 'arbgaliza@gmail.com';
+
+async function sendOtpEmail(email, otp) {
+  const msg = {
+    to: email,
+    from: FROM_EMAIL,
+    subject: 'Your OTP Code',
+    text: `Your OTP is ${otp}. It expires in 10 minutes.`,
+  };
+
+  try {
+    await sgMail.send(msg);
+    console.log('OTP sent via SendGrid API');
+    return true;
+  } catch (err) {
+    console.error('Failed to send OTP via SendGrid API:', err);
+    // if err.response exists it contains details
+    if (err.response) console.error('SendGrid response:', err.response.body);
+    return false;
   }
-});
-
-const msg = {
-  to: email, // recipient
-  from: 'arbgaliza@gmail.com', // verified sender in SendGrid
-  subject: 'Your OTP Code',
-  text: `Your OTP is ${otp}. It expires in 10 minutes.`,
-};
-
-try {
-  await sgMail.send(msg);
-  console.log('OTP sent via SendGrid API');
-} catch (err) {
-  console.error('Failed to send OTP via SendGrid API:', err);
 }
-
 // ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
 
