@@ -86,7 +86,7 @@ function Login() {
     }
   };
 
-  // FORGOT PASSWORD (NO OTP)
+  // FORGOT PASSWORD (EMAIL + NEW PASSWORD ONLY)
   const handleForgotPassword = async (e) => {
     e.preventDefault();
     setError('');
@@ -170,7 +170,7 @@ function Login() {
           />
         )}
 
-        {(isRegistering || isForgotPassword) && (
+        {isRegistering && (
           <input
             type="email"
             placeholder="Email Address"
@@ -180,8 +180,15 @@ function Login() {
           />
         )}
 
-        {isForgotPassword ? (
+        {isForgotPassword && (
           <>
+            <input
+              type="email"
+              placeholder="Email Address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
             <input
               type="password"
               placeholder="New Password"
@@ -189,7 +196,6 @@ function Login() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-
             <input
               type="password"
               placeholder="Confirm Password"
@@ -198,7 +204,9 @@ function Login() {
               required
             />
           </>
-        ) : (
+        )}
+
+        {!isForgotPassword && !isRegistering && (
           <input
             type="password"
             placeholder="Password"
@@ -276,26 +284,26 @@ function Login() {
         </div>
 
         {!isRegistering && !isForgotPassword && (
-          <>
-            <p className="forgot-password">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsForgotPassword(true);
-                  setError('');
-                  setSuccess('');
-                }}
-                className="link-button"
-              >
-                Forgot Password?
-              </button>
-            </p>
+          <p className="forgot-password">
+            <button
+              type="button"
+              onClick={() => {
+                setIsForgotPassword(true);
+                setError('');
+                setSuccess('');
+              }}
+              className="link-button"
+            >
+              Forgot Password?
+            </button>
+          </p>
+        )}
 
-            <p className="officer-login">
-              Are you an Officer?{' '}
-              <Link to="/login1" className="officer-link">Login here</Link>
-            </p>
-          </>
+        {!isRegistering && !isForgotPassword && (
+          <p className="officer-login">
+            Are you an Officer?{' '}
+            <Link to="/login1" className="officer-link">Login here</Link>
+          </p>
         )}
       </form>
     </div>
