@@ -12,7 +12,8 @@ import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import cron from "node-cron";
 import { format } from "date-fns";
-
+import sgMail from '@sendgrid/mail';
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 dotenv.config(); // <-- load environment variables first
 
 
