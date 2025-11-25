@@ -454,7 +454,6 @@ app.delete('/api/categories/:id', async (req, res) => {
   }
 });
 
-
 function normalizeParticipants(participants) {
   if (!participants) return [];
   if (Array.isArray(participants)) return participants.map(String);
