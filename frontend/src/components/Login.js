@@ -47,12 +47,13 @@ function Login() {
     }
   };
 
-  // REGISTER
+  // REGISTER 
   const handleRegister = async (e) => {
     e.preventDefault();
     setError('');
     setSuccess('');
 
+    // --- Frontend Validation ---
     if (!/^\d{7}$/.test(employee_number)) {
       setError('Employee number must be 7 digits');
       return;
@@ -62,6 +63,13 @@ function Login() {
       setError('Enter a valid email');
       return;
     }
+
+    // CHECK PASSWORD MATCH (ADDED)
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    // ----------------------------
 
     try {
       const res = await axios.post(`${process.env.REACT_APP_API_URL}/api/users`, {
@@ -77,12 +85,21 @@ function Login() {
         setEmployeeNumber('');
         setEmail('');
         setPassword('');
+        setConfirmPassword('');
         setType('');
       } else {
         setError(res.data.error || 'Registration failed.');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Server error during registration.');
+      const status = err.response?.status;
+      const backendMessage = err.response?.data?.error || err.response?.data?.message;
+
+      // Handle user already exists error (409 Conflict)
+      if (status === 409 || backendMessage?.toLowerCase().includes('already exists')) {
+        setError('Registration failed: An account with this Employee Number or Email already exists.');
+      } else {
+        setError(backendMessage || 'Server error during registration. Please try again.');
+      }
     }
   };
 
@@ -160,6 +177,7 @@ function Login() {
         {error && <div className="error">{error}</div>}
         {success && <div className="success">{success}</div>}
 
+        {/* EMPLOYEE NUMBER INPUT (Visible for Login/Register) */}
         {!isForgotPassword && (
           <input
             type="text"
@@ -170,7 +188,8 @@ function Login() {
           />
         )}
 
-        {isRegistering && (
+        {/* EMAIL INPUT (Visible for Register/Forgot Password) */}
+        {(isRegistering || isForgotPassword) && (
           <input
             type="email"
             placeholder="Email Address"
@@ -180,15 +199,9 @@ function Login() {
           />
         )}
 
+        {/* PASSWORD INPUTS FOR FORGOT PASSWORD */}
         {isForgotPassword && (
           <>
-            <input
-              type="email"
-              placeholder="Email Address"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
             <input
               type="password"
               placeholder="New Password"
@@ -206,6 +219,27 @@ function Login() {
           </>
         )}
 
+        {/* PASSWORD INPUTS FOR REGISTRATION (ADDED) */}
+        {isRegistering && (
+          <>
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Confirm Password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </>
+        )}
+
+        {/* PASSWORD INPUT FOR REGULAR LOGIN */}
         {!isForgotPassword && !isRegistering && (
           <input
             type="password"
@@ -216,6 +250,7 @@ function Login() {
           />
         )}
 
+        {/* TYPE SELECTOR (Visible for Register) */}
         {isRegistering && (
           <select value={type} onChange={(e) => setType(e.target.value)} required>
             <option value="">Select Type</option>
