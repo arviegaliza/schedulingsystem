@@ -11,17 +11,16 @@ const Reports = () => {
   const [end, setEnd] = useState('');
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
-const BASE_URL = process.env.REACT_APP_API_URL;
+  const BASE_URL = process.env.REACT_APP_API_URL;
 
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem('user'));
+    setUser(storedUser);
 
-useEffect(() => {
-  const storedUser = JSON.parse(localStorage.getItem('user'));
-  setUser(storedUser);
-
-  axios.get(`${BASE_URL}/api/department`)
-    .then(res => setDepartments(res.data.map(d => d.department)))
-    .catch(() => setDepartments([]));
-}, [BASE_URL]);
+    axios.get(`${BASE_URL}/api/department`)
+      .then(res => setDepartments(res.data.map(d => d.department)))
+      .catch(() => setDepartments([]));
+  }, [BASE_URL]);
 
   const handleDownload = async () => {
     if (type === 'monthly' && (!start || !end)) {
@@ -32,7 +31,9 @@ useEffect(() => {
       alert('Please select both start and end dates for weekly reports.');
       return;
     }
+
     setLoading(true);
+
     try {
       const params = {
         department,
@@ -42,21 +43,31 @@ useEffect(() => {
         userType: user?.type || 'Administrator',
       };
 
+      const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
+        params,
+        responseType: 'blob', // important for file download
+      });
 
-const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
-  params,
-  responseType: 'blob',
-});
-
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      // Create a downloadable link
+      const blob = new Blob([response.data], { type: format === 'xlsx' ? 
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 
+        'application/pdf' 
+      });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `report_${type}_${department}_${Date.now()}.${format === 'xlsx' ? 'xlsx' : 'pdf'}`);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
+
     } catch (err) {
-      alert('Failed to download report');
+      console.error('Download error:', err.response || err);
+      if (err.response?.data?.error) {
+        alert(`Failed to download report: ${err.response.data.error}`);
+      } else {
+        alert('Failed to download report. Server error or invalid parameters.');
+      }
     } finally {
       setLoading(false);
     }
@@ -65,6 +76,7 @@ const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
   return (
     <div className="report-container">
       <h2>Generate Reports</h2>
+
       <div className="report-form-row">
         <div className="report-form-col">
           <label className="report-label">Department</label>
@@ -75,6 +87,7 @@ const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
             ))}
           </select>
         </div>
+
         <div className="report-form-col">
           <label className="report-label">Report Type</label>
           <select className="report-select" value={type} onChange={e => setType(e.target.value)}>
@@ -83,15 +96,12 @@ const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
           </select>
         </div>
       </div>
+
       {type === 'monthly' ? (
         <div className="report-form-row">
           <div className="report-form-col">
             <label className="report-label">Month</label>
-            <select
-              className="report-select"
-              value={start}
-              onChange={e => setStart(e.target.value)}
-            >
+            <select className="report-select" value={start} onChange={e => setStart(e.target.value)}>
               <option value="">Select Month</option>
               {[
                 'January', 'February', 'March', 'April', 'May', 'June',
@@ -140,6 +150,7 @@ const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
           </div>
         </div>
       )}
+
       <button onClick={handleDownload} disabled={loading} className="report-download-btn">
         {loading ? 'Generating...' : 'Download Report'}
       </button>
@@ -147,4 +158,4 @@ const response = await axios.get(`${BASE_URL}/api/reports/${type}`, {
   );
 };
 
-export default Reports; 
+export default Reports;
