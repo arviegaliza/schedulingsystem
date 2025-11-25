@@ -20,7 +20,13 @@ dotenv.config(); // <-- load environment variables first
 // use a verified sender in your SendGrid account
 const FROM_EMAIL = process.env.EMAIL_USER || 'arbgaliza@gmail.com';
 
-
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,  // your Gmail
+    pass: process.env.EMAIL_PASS,  // your App Password
+  },
+});
 // ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
 
@@ -238,7 +244,7 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
-// 4️⃣ Reset all events every week (Sunday midnight)
+// 4️⃣ Reset all  every week (Sunday midnight)
 cron.schedule('0 0 * * 0', async () => {
   try {
     const res = await pool.query('DELETE FROM schedule_events');
@@ -462,11 +468,22 @@ app.get('/api/events', async (req, res) => {
     `;
     const { rows } = await pool.query(sql);
 
-    const events = rows.map(event => ({
-      ...event,
-      participants: safeJSONParse(event.participants),
-      department: safeJSONParse(event.department)
-    }));
+    const events = rows.map(event => {
+      const participants = safeJSONParse(event.participants);
+      const department = safeJSONParse(event.department);
+
+      // Combine date and time into ISO string
+      const start = new Date(`${event.start_date}T${event.start_time}`);
+      const end = new Date(`${event.end_date}T${event.end_time}`);
+
+      return {
+        ...event,
+        participants,
+        department,
+        start,
+        end
+      };
+    });
 
     res.json(events);
   } catch (err) {
