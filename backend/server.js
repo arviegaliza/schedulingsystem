@@ -253,125 +253,99 @@ cron.schedule('0 0 * * 0', async () => {
   }
 });
 
-app.post('/api/forgot-password', async (req, res) => {
+app.post("/api/forgot-password", async (req, res) => {
   const { email } = req.body;
-
-  if (!email) 
-    return res.status(400).json({ success: false, message: 'Email is required' });
+  if (!email) return res.status(400).json({ success: false, message: "Email required" });
 
   try {
-    // Generate OTP and expiration time
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpires = new Date(Date.now() + 10 * 60000); // 10 minutes from now
-
-    // Find user
-    const findUserQuery = 'SELECT * FROM users WHERE email = $1';
-    const findResult = await pool.query(findUserQuery, [email]);
-
-    if (findResult.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    const userResult = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    if (!userResult.rows.length) {
+      return res.status(404).json({ success: false, message: "Email not found" });
     }
 
-    const user = findResult.rows[0];
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000); // 6-digit
+    const expires = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
-    // Update OTP in database
-    const updateOtpQuery = `
-      UPDATE users 
-      SET otp_code = $1, otp_expires = $2
-      WHERE id = $3
-    `;
-    await pool.query(updateOtpQuery, [otp, otpExpires, user.id]);
+    // Save OTP in DB
+    await pool.query(
+      "UPDATE users SET otp_code = $1, otp_expires = $2 WHERE email = $3",
+      [otp, expires, email]
+    );
 
     // Send OTP email
-    const mailOptions = {
-      from: 'arbgaliza@gmail.com',
-      to: user.email,
-      subject: 'Password Reset OTP',
-      text: `Your OTP code is ${otp}. It will expire in 10 minutes.`
-    };
-
-    transporter.sendMail(mailOptions, (err) => {
-      if (err) {
-        console.error('Failed to send OTP:', err);
-        return res.status(500).json({ success: false, message: 'Failed to send OTP' });
-      }
-
-      res.json({ success: true, message: 'OTP sent to your email' });
+    await transporter.sendMail({
+      from: "no-reply@schedulingsystem.com",
+      to: email,
+      subject: "Your OTP Code",
+      text: `Your OTP is ${otp}. It expires in 10 minutes.`,
     });
 
+    res.json({ success: true, message: "OTP sent to your email." });
   } catch (err) {
-    console.error('Error in forgot-password:', err);
-    res.status(500).json({ success: false, message: 'Database error' });
+    console.error("Forgot-password error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
-// VERIFY OTP
-app.post('/api/verify-otp', (req, res) => {
+app.post("/api/verify-otp", async (req, res) => {
   const { email, otp_code } = req.body;
-
-  const query = 'SELECT * FROM users WHERE email = $1 AND otp_code = $2 AND otp_expires > NOW()';
-  pool.query(query, [email, otp_code], (err, results) => {
-    if (err || results.length === 0) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
-    }
-    res.json({ success: true, message: 'OTP verified' });
-  });
-});
-// RESET PASSWORD - PostgreSQL version
-app.post('/api/reset-password', async (req, res) => {
-  const { email, otp_code, new_password } = req.body;
-
-  if (!email || !otp_code || !new_password) {
-    return res.status(400).json({ success: false, message: 'All fields are required.' });
-  }
+  if (!email || !otp_code)
+    return res.status(400).json({ success: false, message: "Email and OTP required" });
 
   try {
-    // Find user with valid OTP
-    const findQuery = `
-      SELECT * FROM users 
-      WHERE email = $1
-        AND otp_code = $2
-        AND otp_expires > NOW()
-    `;
-    const findResult = await pool.query(findQuery, [email, otp_code]);
+    const result = await pool.query(
+      "SELECT * FROM users WHERE email = $1 AND otp_code = $2 AND otp_expires > NOW()",
+      [email, otp_code]
+    );
 
-    if (findResult.rows.length === 0) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired OTP.' });
+    if (!result.rows.length) {
+      return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
+    }
+
+    res.json({ success: true, message: "OTP verified" });
+  } catch (err) {
+    console.error("Verify OTP error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.post("/api/reset-password", async (req, res) => {
+  const { email, otp_code, new_password } = req.body;
+  if (!email || !otp_code || !new_password)
+    return res.status(400).json({ success: false, message: "All fields required" });
+
+  try {
+    // Check OTP validity
+    const result = await pool.query(
+      "SELECT * FROM users WHERE email = $1 AND otp_code = $2 AND otp_expires > NOW()",
+      [email, otp_code]
+    );
+
+    if (!result.rows.length) {
+      return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
     }
 
     // Update password and clear OTP
-    const updateQuery = `
-      UPDATE users 
-      SET password = $1, otp_code = NULL, otp_expires = NULL
-      WHERE email = $2
-    `;
-    await pool.query(updateQuery, [new_password, email]);
+    await pool.query(
+      "UPDATE users SET password = $1, otp_code = NULL, otp_expires = NULL WHERE email = $2",
+      [new_password, email]
+    );
 
-    // Send email notification
-    const mailOptions = {
-      from: 'arbgaliza@gmail.com',
-      to: findResult.rows[0].email,
-      subject: 'Password Changed',
-      text: `Hello ${findResult.rows[0].email},\n\nYour password has been successfully changed.\nIf you did not request this change, please contact support immediately.`
-    };
-
-    transporter.sendMail(mailOptions, (err) => {
-      if (err) {
-        console.error('Failed to send password change notification:', err);
-        return res.status(500).json({
-          success: true,
-          message: 'Password updated, but failed to send email notification.'
-        });
-      }
-
-      res.json({ success: true, message: 'Password changed and email notification sent.' });
+    // Notify user
+    await transporter.sendMail({
+      from: "no-reply@schedulingsystem.com",
+      to: email,
+      subject: "Password Changed",
+      text: `Hello ${email},\n\nYour password has been successfully changed.\nIf you did not request this, contact support immediately.`,
     });
 
+    res.json({ success: true, message: "Password reset successfully" });
   } catch (err) {
-    console.error('Error resetting password:', err);
-    res.status(500).json({ success: false, message: 'Database error.' });
+    console.error("Reset-password error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
 
 
 // Categories
