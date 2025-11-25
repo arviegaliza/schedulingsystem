@@ -680,43 +680,49 @@ function checkReportAccess(req, res, next) {
 app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
   const { department = 'All', start, end, format = 'xlsx' } = req.query;
   const { type } = req.params; // 'weekly' or 'monthly'
-  const userType = req.userType;
+  const userType = req.userType || 'Administrator'; // default if undefined
 
   try {
-    // Validate required dates
-    if ((type === 'monthly' || type !== 'monthly') && (!start || !end)) {
+    // Validate required dates for monthly
+    if (!start || !end) {
       return res.status(400).json({ error: 'Start and end dates are required.' });
     }
 
+    const startMonth = Number(start);
+    const endYear = Number(end);
+
+    if (type === 'monthly' && (isNaN(startMonth) || isNaN(endYear) || startMonth < 1 || startMonth > 12)) {
+      return res.status(400).json({ error: 'Invalid month or year.' });
+    }
+
     // Fetch categories
-    const categories = await pool.query(
-      `SELECT * FROM categories WHERE 1=1 ${getDepartmentFilter(department, userType, 'categories')}`
-    ).then(r => r.rows);
+    const categoriesQuery = `SELECT * FROM categories WHERE 1=1 ${getDepartmentFilter(department, userType, 'categories')}`;
+    const categories = (await pool.query(categoriesQuery)).rows;
 
     // Fetch users
     const usersQuery = 'SELECT id, employee_number, email, type FROM users WHERE 1=1' + 
                        (department && department !== 'All' ? ' AND type = $1' : '');
-    const users = await pool.query(usersQuery, department && department !== 'All' ? [department] : []).then(r => r.rows);
+    const users = (await pool.query(usersQuery, department && department !== 'All' ? [department] : [])).rows;
 
     // Fetch events
-    let events;
+    let events = [];
     if (type === 'monthly') {
-      events = await pool.query(
-        `SELECT * FROM schedule_events
-         WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')}
-         AND EXTRACT(MONTH FROM start_date) = $1
-         AND EXTRACT(YEAR FROM start_date) = $2`,
-        [start, end]
-      ).then(r => r.rows);
+      const eventsQuery = `
+        SELECT * FROM schedule_events
+        WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')}
+        AND EXTRACT(MONTH FROM start_date) = $1
+        AND EXTRACT(YEAR FROM start_date) = $2
+      `;
+      events = (await pool.query(eventsQuery, [startMonth, endYear])).rows;
     } else {
-      events = await pool.query(
-        `SELECT * FROM schedule_events
-         WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')} ${getDateFilter(start, end)}`
-      ).then(r => r.rows);
+      const eventsQuery = `
+        SELECT * FROM schedule_events
+        WHERE 1=1 ${getDepartmentFilter(department, userType, 'events')} ${getDateFilter(start, end)}
+      `;
+      events = (await pool.query(eventsQuery)).rows;
     }
 
     // ------------------- EXPORT -------------------
-
     if (format === 'xlsx') {
       const workbook = new ExcelJS.Workbook();
 
@@ -764,11 +770,13 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
 
       const formatParticipants = (participants) => {
         if (!participants) return '';
-        let arr = participants;
-        if (typeof arr === 'string') {
-          try { arr = JSON.parse(arr); } catch { arr = [arr]; }
+        if (Array.isArray(participants)) return participants.join(', ');
+        try {
+          const arr = JSON.parse(participants);
+          return Array.isArray(arr) ? arr.map(p => `${p}${officeMap[p] ? ` (${officeMap[p]})` : ''}`).join(', ') : participants;
+        } catch {
+          return participants.toString();
         }
-        return arr.map(p => `${p}${officeMap[p] ? ` (${officeMap[p]})` : ''}`).join(', ');
       };
 
       events.forEach(ev => eventSheet.addRow({
@@ -782,7 +790,7 @@ app.get('/api/reports/:type', checkReportAccess, async (req, res) => {
       res.end();
 
     } else if (format === 'pdf') {
-      const doc = new PDFDocument();
+      const doc = new PDFDocument({ margin: 30 });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=report_${type}_${department}_${Date.now()}.pdf`);
       doc.pipe(res);
