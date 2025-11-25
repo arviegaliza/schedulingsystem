@@ -454,16 +454,6 @@ app.delete('/api/categories/:id', async (req, res) => {
   }
 });
 
-function normalizeParticipants(participants) {
-  if (!participants) return [];
-  if (Array.isArray(participants)) return participants.map(String);
-  try {
-    const parsed = JSON.parse(participants);
-    return Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
-  } catch {
-    return [String(participants)];
-  }
-}
 
 // GET all events for frontend
 app.get('/api/events', async (req, res) => {
