@@ -17,70 +17,70 @@ dotenv.config(); // <-- load environment variables first
 
 
 
-// use a verified sender in your SendGrid account
-const FROM_EMAIL = process.env.EMAIL_USER || 'arbgaliza@gmail.com';
-
+// ---------------------- EMAIL ----------------------
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL_USER,  // your Gmail
-    pass: process.env.EMAIL_PASS,  // your App Password
+    user: process.env.EMAIL_USER,  // Gmail address
+    pass: process.env.EMAIL_PASS,  // App password
   },
 });
+
 // ---------------------- PostgreSQL Pool ----------------------
 const { Pool } = pkg;
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // needed for Render/Postgres SSL
+  ssl: { rejectUnauthorized: false },
 });
 
+// ---------------------- EXPRESS APP ----------------------
 const app = express();
-
-// --------- TRUST PROXY & BODY PARSERS ----------
 app.set("trust proxy", true);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --------- FRONTEND ORIGINS ----------
-const FRONTEND_ORIGINS = [
-  "https://schedulingsystem-ten.vercel.app"
-];
-
-// --------- CORS MIDDLEWARE ----------
+// ---------------------- CORS ----------------------
+const FRONTEND_ORIGINS = ["https://schedulingsystem-ten.vercel.app"];
 app.use((req, res, next) => {
-  const origin = req.get("origin"); // get request origin
+  const origin = req.get("origin");
   if (FRONTEND_ORIGINS.includes(origin)) {
-    res.header("Access-Control-Allow-Origin", origin); // allow only this origin
+    res.header("Access-Control-Allow-Origin", origin);
   }
   res.header("Access-Control-Allow-Credentials", "true");
   res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  );
 
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-
-// --------- HTTP SERVER (Render handles HTTPS) ----------
+// ---------------------- HTTP SERVER ----------------------
 const server = http.createServer(app);
 
-// --------- SOCKET.IO ----------
+// ---------------------- SOCKET.IO ----------------------
 export const io = new Server(server, {
   cors: {
     origin: FRONTEND_ORIGINS,
     methods: ["GET", "POST"],
     credentials: true,
   },
-   allowEIO3: true // only if you need Engine.IO v3 compatibility
+  pingInterval: 10000,      // send ping every 10s
+  pingTimeout: 20000,       // disconnect only after 20s no response
+  transports: ["websocket", "polling"], // fallback for stability
+  allowEIO3: true,          // only if Engine.IO v3 needed
 });
 
-// --------- SOCKET.IO CONNECTION ----------
+// ---------------------- SOCKET.IO CONNECTION ----------------------
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
-  socket.on("disconnect", () => console.log("Socket disconnected:", socket.id));
-});
 
+  socket.on("disconnect", (reason) => {
+    console.log("Socket disconnected:", socket.id, "reason:", reason);
+  });
+});
 // --------- OPTIONS for Socket.IO preflight ----------
 app.options(/\/socket\.io\/.*/, (req, res) => {
   res.header("Access-Control-Allow-Origin", FRONTEND_ORIGINS.join(","));
