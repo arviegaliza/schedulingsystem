@@ -534,7 +534,7 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-// 2️⃣ POST add new event
+// POST /api/events - Add new event (improved conflict reporting)
 app.post('/api/events', async (req, res) => {
   const {
     program, start_date, start_time, end_date, end_time,
@@ -545,33 +545,76 @@ app.post('/api/events', async (req, res) => {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
-  const newStart = `${start_date}T${start_time}`;
-  const newEnd = `${end_date}T${end_time}`;
-  const payloadParticipants = normalizeParticipants(participants);
+  // Normalize participants array
+  const payloadParticipants = Array.isArray(participants) ? participants : (typeof participants === 'string' ? JSON.parse(participants) : []);
+  const payloadDepartments = Array.isArray(department) ? department : (typeof department === 'string' ? JSON.parse(department) : []);
+
+  // Build ISO datetime strings
+  let newStartISO = `${start_date}T${start_time}`;
+  let newEndISO = `${end_date}T${end_time}`;
+
+  // Make JS Date objects to handle overnight end times
+  let newStart = new Date(newStartISO);
+  let newEnd = new Date(newEndISO);
+
+  // If end <= start, assume event crosses midnight => add 1 day to end
+  if (newEnd <= newStart) {
+    newEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+    newEndISO = newEnd.toISOString().slice(0,19); // keep yyyy-mm-ddTHH:MM:SS
+  }
 
   try {
-    // Check for overlapping events (timestamp-safe)
+    // Query DB for ANY events that overlap the time window (timestamp-safe)
     const conflictQuery = `
-      SELECT * FROM schedule_events
+      SELECT id, program, start_date, start_time, end_date, end_time, participants
+      FROM schedule_events
       WHERE NOT (
-        (start_date || 'T' || start_time)::timestamp >= $2::timestamp OR
-        (end_date || 'T' || end_time)::timestamp <= $1::timestamp
+        (start_date || 'T' || start_time)::timestamp >= $2::timestamp
+        OR (end_date   || 'T' || end_time  )::timestamp <= $1::timestamp
       )
     `;
-    const conflictResult = await pool.query(conflictQuery, [newStart, newEnd]);
+    const conflictResult = await pool.query(conflictQuery, [newStart.toISOString().slice(0,19), newEnd.toISOString().slice(0,19)]);
 
-    const hasConflict = conflictResult.rows.some(event => {
-      const eventParticipants = normalizeParticipants(event.participants);
-      return payloadParticipants.some(p => eventParticipants.includes(p));
-    });
+    // Build list of conflicting events that share participants
+    const conflicts = [];
 
-    if (hasConflict) {
+    for (const ev of conflictResult.rows) {
+      // normalize stored participants
+      let evParticipants = [];
+      if (Array.isArray(ev.participants)) evParticipants = ev.participants;
+      else if (typeof ev.participants === 'string') {
+        try { evParticipants = JSON.parse(ev.participants); }
+        catch { evParticipants = [ev.participants]; }
+      }
+
+      const normalizedEvParticipants = evParticipants.map(p => String(p).trim().toLowerCase());
+      const normalizedPayloadParticipants = payloadParticipants.map(p => String(p).trim().toLowerCase());
+
+      const overlappingParticipants = normalizedPayloadParticipants.filter(p => normalizedEvParticipants.includes(p));
+
+      if (overlappingParticipants.length > 0) {
+        // compute DB event start/end ISO for clarity
+        const evStartISO = `${ev.start_date}T${ev.start_time}`;
+        const evEndISO = `${ev.end_date}T${ev.end_time}`;
+        conflicts.push({
+          eventId: ev.id,
+          program: ev.program,
+          start: evStartISO,
+          end: evEndISO,
+          conflictingParticipants: overlappingParticipants
+        });
+      }
+    }
+
+    if (conflicts.length > 0) {
+      // Return 409 with structured conflict info
       return res.status(409).json({
-        error: 'Conflict: A selected office/participant is already booked during the selected date & time range.'
+        error: 'Conflict: One or more participants are already booked during the selected range.',
+        conflicts
       });
     }
 
-    // Insert new event
+    // No conflicts — insert the event
     const insertQuery = `
       INSERT INTO schedule_events
         (program, start_date, start_time, end_date, end_time, purpose, participants, department, status, created_by)
@@ -581,21 +624,21 @@ app.post('/api/events', async (req, res) => {
     `;
     const insertParams = [
       program, start_date, start_time, end_date, end_time,
-      purpose, JSON.stringify(participants), JSON.stringify(department), created_by
+      purpose, JSON.stringify(payloadParticipants), JSON.stringify(payloadDepartments), created_by
     ];
 
     const insertResult = await pool.query(insertQuery, insertParams);
 
-    // Emit socket.io update
+    // Notify via socket.io
     io.emit('eventAdded', { eventId: insertResult.rows[0].id });
 
-    res.status(201).json({
+    return res.status(201).json({
       message: 'Event added successfully',
       eventId: insertResult.rows[0].id
     });
   } catch (err) {
     console.error('Error adding event:', err);
-    res.status(500).json({ error: 'Database error while adding event.' });
+    return res.status(500).json({ error: 'Database error while adding event.' });
   }
 });
 
