@@ -72,6 +72,7 @@ export const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true,
   },
+   allowEIO3: true // only if you need Engine.IO v3 compatibility
 });
 
 // --------- SOCKET.IO CONNECTION ----------
