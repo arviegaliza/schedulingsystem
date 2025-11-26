@@ -1,4 +1,4 @@
-// Schedule.js
+// ...all your imports
 import React, { useState, useEffect, useCallback } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
@@ -58,6 +58,7 @@ function Schedule() {
   const handleLogout = () => {
     localStorage.removeItem('user');
     toast.success('Logged out successfully');
+    // If on /office/schedule, always go to /login1
     if (window.location.pathname === '/office/schedule') {
       navigate('/login1');
     } else {
@@ -67,108 +68,67 @@ function Schedule() {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
-    // Accept ISO like "2025-11-26T12:00:20" or plain "2025-11-26"
-    const d = dateStr.includes('T') ? new Date(dateStr) : new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString('en-US');
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US');
   };
 
   const formatTime = (timeStr) => {
     if (!timeStr) return '';
-    // timeStr might be "HH:MM:SS" or "HH:MM"
     const [hours, minutes] = timeStr.split(':');
-    const dateObj = new Date();
-    dateObj.setHours(parseInt(hours || 0), parseInt(minutes || 0));
-    return dateObj.toLocaleTimeString('en-US', {
+    const date = new Date();
+    date.setHours(parseInt(hours), parseInt(minutes));
+    return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true
     });
   };
 
-  // Parse local date + time into JS Date. Returns null if missing.
-  const getDateTime = (dateStr, timeStr) => {
-    if (!dateStr || !timeStr) return null;
-    const [hh, mm, ss = '00'] = timeStr.split(':');
-    const d = new Date(dateStr); // sets midnight local time for that date
-    d.setHours(Number(hh), Number(mm), Number(ss), 0);
-    return d;
-  };
-
   const fetchEvents = useCallback(async () => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/events`);
-      const eventsWithParsedData = res.data.map(event => {
-        // normalize participants and department (accept stringified JSON or arrays)
-        let participants = event.participants;
-        if (typeof participants === 'string') {
-          try { participants = JSON.parse(participants); }
-          catch { participants = [participants]; }
-        }
-        participants = Array.isArray(participants) ? participants : [];
+          const res = await axios.get(
+  `${process.env.REACT_APP_API_URL}/api/events`
+);
 
-        let department = event.department;
-        if (typeof department === 'string') {
-          try { department = JSON.parse(department); }
-          catch { department = [department]; }
-        }
-        department = Array.isArray(department) ? department : [];
-
-        // Support backend that returns ISO start/end OR start_date + start_time
-        // If backend provided 'start' or 'end', we still keep start_date/start_time for display.
-        const startISO = event.start || (event.start_date && event.start_time ? `${event.start_date}T${event.start_time}` : null);
-        const endISO = event.end || (event.end_date && event.end_time ? `${event.end_date}T${event.end_time}` : null);
-
-        return {
-          ...event,
-          participants,
-          department,
-          startISO,
-          endISO
-        };
-      });
+      const eventsWithParsedData = res.data.map(event => ({
+        ...event,
+        participants: typeof event.participants === 'string' ? JSON.parse(event.participants) : event.participants || [],
+        department: typeof event.department === 'string' ? JSON.parse(event.department) : event.department || [],
+      }));
       setEvents(eventsWithParsedData);
     } catch (err) {
-      console.error('Failed to fetch events', err);
       toast.error('Failed to load events.');
     }
   }, []);
 
   useEffect(() => {
-    // robust socket.io client: websocket first, polling fallback
-    const socket = io(process.env.REACT_APP_API_URL, {
-      path: '/socket.io',
-      transports: ['websocket', 'polling'],
-      upgrade: true,
-      withCredentials: true,
-      secure: true
-    });
+    const socket = io(process.env.REACT_APP_API_URL);
 
-    socket.on('connect', () => console.log('🟢 Connected to WebSocket', socket.id));
-    socket.on('connect_error', (err) => console.warn('Socket connect error', err));
+    socket.on('connect', () => console.log('🟢 Connected to WebSocket'));
     socket.on('statusUpdated', () => fetchEvents());
-    socket.on('eventAdded', () => fetchEvents());
-    socket.on('eventDeleted', () => fetchEvents());
-    socket.on('eventUpdated', () => fetchEvents());
-
     return () => socket.disconnect();
   }, [fetchEvents]);
 
   const fetchDepartments = useCallback(async () => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/department`);
+      const res = await axios.get(
+  `${process.env.REACT_APP_API_URL}/api/department`
+);
+
       setDepartments(res.data.map(d => d.department));
     } catch (err) {
-      console.error('Failed to fetch departments', err);
       toast.error('Failed to load departments.');
     }
   }, []);
 
   const fetchCategories = useCallback(async () => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/categories`);
+        const res = await axios.get(
+  `${process.env.REACT_APP_API_URL}/api/categories`
+);
+
       setCategories(res.data);
     } catch (err) {
-      console.error('Failed to fetch categories', err);
       toast.error('Failed to load categories.');
     }
   }, []);
@@ -190,6 +150,8 @@ function Schedule() {
     department: []
   });
 
+  const getDateTime = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}`);
+
   const handleAddOrUpdate = async (e) => {
     e.preventDefault();
     toast.dismiss();
@@ -207,83 +169,72 @@ function Schedule() {
     };
 
     if (!payload.participants.length || !payload.department.length) {
-      toast.error('Please select at least one department and one participant.');
-      setIsSubmitting(false);
-      return;
+      return toast.error('Please select at least one department and one participant.');
     }
 
-    // local pre-check (client-side) normalized arrays
-    const payloadParticipants = payload.participants.map(p => String(p).trim().toLowerCase());
-    // build Start/End JS Dates
-    let newStart = getDateTime(payload.start_date, payload.start_time);
-    let newEnd = getDateTime(payload.end_date, payload.end_time);
-    if (!newStart || !newEnd) {
-      toast.error('Invalid start or end datetime.');
-      setIsSubmitting(false);
-      return;
-    }
-    // treat overnight events (end <= start) as crossing midnight
-    if (newEnd <= newStart) {
-      newEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
-    }
+    const payloadParticipants = payload.participants.map(p => p.trim().toLowerCase());
+    const newStart = getDateTime(payload.start_date, payload.start_time);
+    const newEnd = getDateTime(payload.end_date, payload.end_time);
 
-    // client-side conflict check to give immediate feedback
+    // Robust office conflict check
     const hasOfficeConflict = events.some(event => {
       if (editMode && event.id === editingId) return false;
-
-      // event start/end (try event.startISO first)
-      let eventStart = event.startISO ? new Date(event.startISO) : getDateTime(event.start_date, event.start_time);
-      let eventEnd = event.endISO ? new Date(event.endISO) : getDateTime(event.end_date, event.end_time);
-
-      if (!eventStart || !eventEnd) return false;
-
-      if (eventEnd <= eventStart) {
-        eventEnd = new Date(eventEnd.getTime() + 24 * 60 * 60 * 1000);
-      }
-
+      const eventStart = getDateTime(event.start_date, event.start_time);
+      const eventEnd = getDateTime(event.end_date, event.end_time);
       const overlaps = newStart < eventEnd && newEnd > eventStart;
 
-      // normalize event participants
-      const eventParticipants = Array.isArray(event.participants) ? event.participants : [];
-      const normalizedEventParticipants = eventParticipants.map(p => String(p).trim().toLowerCase());
+      // Always treat participants as array of normalized strings
+      let eventParticipants = [];
+      if (Array.isArray(event.participants)) {
+        eventParticipants = event.participants;
+      } else if (typeof event.participants === 'string') {
+        try {
+          const parsed = JSON.parse(event.participants);
+          eventParticipants = Array.isArray(parsed) ? parsed : [event.participants];
+        } catch {
+          eventParticipants = [event.participants];
+        }
+      }
+      const normalizedEventParticipants = eventParticipants.map(p => p.trim().toLowerCase());
       const officeConflict = normalizedEventParticipants.some(p => payloadParticipants.includes(p));
       return overlaps && officeConflict;
     });
 
     if (hasOfficeConflict) {
       toast.error('Conflict: A selected office is already booked during the selected date & time range.');
-      setIsSubmitting(false);
       return;
     }
 
     try {
       if (editMode) {
-        await axios.put(`${process.env.REACT_APP_API_URL}/api/events/${editingId}`, payload);
+            await axios.put(
+  `${process.env.REACT_APP_API_URL}/api/events/${editingId}`,
+  payload
+);
+
         toast.success('Event updated successfully!');
       } else {
-        await axios.post(`${process.env.REACT_APP_API_URL}/api/events`, payload);
+            await axios.post(
+  `${process.env.REACT_APP_API_URL}/api/events`,
+  payload
+);
+
         toast.success('Event added successfully!');
       }
-      await fetchEvents();
+      fetchEvents();
       setShowForm(false);
       setEditMode(false);
       resetForm();
     } catch (err) {
-      // handle detailed 409 from backend with conflicts array
-      if (err.response && err.response.status === 409 && err.response.data) {
-        const data = err.response.data;
-        if (Array.isArray(data.conflicts) && data.conflicts.length > 0) {
-          const lines = data.conflicts.map(c => {
-            const start = (c.start || '').replace('T', ' ');
-            const end = (c.end || '').replace('T', ' ');
-            return `${c.conflictingParticipants.join(', ')} → "${c.program}" (${start} - ${end})`;
-          });
-          toast.error(`Conflict detected:\n${lines.join('\n')}`, { autoClose: 8000 });
-        } else {
-          toast.error(data.error || 'Conflict: selected office is already booked.');
-        }
+      const conflictMsg = 'Conflict: A selected office is already booked during the selected date & time range.';
+      if (
+        err.response &&
+        err.response.data &&
+        err.response.data.error &&
+        err.response.data.error.includes('selected office is already booked')
+      ) {
+        toast.error(conflictMsg);
       } else {
-        console.error('Save event error:', err);
         toast.error('Failed to save event.');
       }
     } finally {
@@ -293,13 +244,11 @@ function Schedule() {
 
   const handleEdit = (event) => {
     setFormData({
-      ...formData,
-      program: event.program || '',
-      start_date: event.start_date || (event.startISO ? event.startISO.slice(0,10) : ''),
-      start_time: event.start_time ? event.start_time.slice(0,5) : (event.startISO ? event.startISO.slice(11,16) : ''),
-      end_date: event.end_date || (event.endISO ? event.endISO.slice(0,10) : ''),
-      end_time: event.end_time ? event.end_time.slice(0,5) : (event.endISO ? event.endISO.slice(11,16) : ''),
-      purpose: event.purpose || '',
+      ...event,
+      start_date: event.start_date,
+      start_time: event.start_time.slice(0, 5),
+      end_date: event.end_date,
+      end_time: event.end_time.slice(0, 5),
       participants: (event.participants || []).map(p => ({ label: p, value: p })),
       department: (event.department || []).map(d => ({ label: d, value: d }))
     });
@@ -314,44 +263,32 @@ function Schedule() {
     .map(dept => ({ label: dept, value: dept }))
     .filter(option => {
       const isSelected = formData.department.some(d => d.value === option.value);
-      // if start/end not set, assume not booking check
       const newStart = getDateTime(formData.start_date, formData.start_time);
       const newEnd = getDateTime(formData.end_date, formData.end_time);
-      if (!newStart || !newEnd) return isSelected;
-
-      let s = newStart, e = newEnd;
-      if (e <= s) e = new Date(e.getTime() + 24 * 60 * 60 * 1000);
 
       const isBooked = events.some(event => {
         if (editMode && event.id === editingId) return false;
-        let eventStart = event.startISO ? new Date(event.startISO) : getDateTime(event.start_date, event.start_time);
-        let eventEnd = event.endISO ? new Date(event.endISO) : getDateTime(event.end_date, event.end_time);
-        if (!eventStart || !eventEnd) return false;
-        if (eventEnd <= eventStart) eventEnd = new Date(eventEnd.getTime() + 24 * 60 * 60 * 1000);
-        const overlaps = s < eventEnd && e > eventStart;
-        return overlaps && (event.department || []).includes(option.value);
+        const eventStart = getDateTime(event.start_date, event.start_time);
+        const eventEnd = getDateTime(event.end_date, event.end_time);
+        const overlaps = newStart < eventEnd && newEnd > eventStart;
+        return overlaps && event.department.includes(option.value);
       });
 
       return isSelected || !isBooked;
     });
 
   const filteredCategories = categories.filter(cat =>
-    formData.department.some(d => d.value === cat.department?.trim())
+    formData.department.some(d => d.value === cat.department.trim())
   );
 
   const unavailableParticipants = events
     .filter(event => {
       if (editMode && event.id === editingId) return false;
-      let eventStart = event.startISO ? new Date(event.startISO) : getDateTime(event.start_date, event.start_time);
-      let eventEnd = event.endISO ? new Date(event.endISO) : getDateTime(event.end_date, event.end_time);
+      const eventStart = getDateTime(event.start_date, event.start_time);
+      const eventEnd = getDateTime(event.end_date, event.end_time);
       const newStart = getDateTime(formData.start_date, formData.start_time);
       const newEnd = getDateTime(formData.end_date, formData.end_time);
-      if (!newStart || !newEnd || !eventStart || !eventEnd) return false;
-      if (eventEnd <= eventStart) eventEnd = new Date(eventEnd.getTime() + 24 * 60 * 60 * 1000);
-      let ns = newStart, ne = newEnd;
-      if (ne <= ns) ne = new Date(ne.getTime() + 24 * 60 * 60 * 1000);
-      const overlaps = ns < eventEnd && ne > eventStart;
-      return overlaps;
+      return newStart < eventEnd && newEnd > eventStart;
     })
     .flatMap(event => event.participants || []);
 
@@ -362,21 +299,13 @@ function Schedule() {
       return isSelected || !unavailableParticipants.includes(opt.value);
     });
 
-  // show events that overlap the selected date (consider time)
   const eventsForSelectedDate = events.filter((event) => {
     if (event.status === 'ended') return false;
-
-    let eventStart = event.startISO ? new Date(event.startISO) : getDateTime(event.start_date, event.start_time);
-    let eventEnd = event.endISO ? new Date(event.endISO) : getDateTime(event.end_date, event.end_time);
-    if (!eventStart || !eventEnd) return false;
-    if (eventEnd <= eventStart) eventEnd = new Date(eventEnd.getTime() + 24 * 60 * 60 * 1000);
-
-    const dayStart = new Date(date); dayStart.setHours(0,0,0,0);
-    const dayEnd = new Date(date); dayEnd.setHours(23,59,59,999);
-
-    const overlapsDay = eventEnd >= dayStart && eventStart <= dayEnd;
-    const matchesDept = selectedDept ? (event.department || []).includes(selectedDept) : true;
-    return overlapsDay && matchesDept;
+    const eventStartDate = new Date(event.start_date);
+    const eventEndDate = new Date(event.end_date);
+    const isInRange = eventStartDate <= date && eventEndDate >= date;
+    const matchesDept = selectedDept ? event.department?.includes(selectedDept) : true;
+    return isInRange && matchesDept;
   });
 
   const handleDayMouseEnter = (tileDate, events, e) => {
@@ -393,11 +322,11 @@ function Schedule() {
     if (view === 'month') {
       const matches = events.filter(event => {
         if (event.status === 'ended') return false;
-        let eventStart = event.startISO ? new Date(event.startISO) : getDateTime(event.start_date, event.start_time);
-        let eventEnd = event.endISO ? new Date(event.endISO) : getDateTime(event.end_date, event.end_time);
-        if (!eventStart || !eventEnd) return false;
-        if (eventEnd <= eventStart) eventEnd = new Date(eventEnd.getTime() + 24 * 60 * 60 * 1000);
-        return eventStart <= tileDate && eventEnd >= tileDate && (selectedDept ? (event.department || []).includes(selectedDept) : true);
+        const eventStartDate = new Date(event.start_date);
+        const eventEndDate = new Date(event.end_date);
+        return eventStartDate <= tileDate &&
+          eventEndDate >= tileDate &&
+          (selectedDept ? event.department?.includes(selectedDept) : true);
       });
       return (
         <div
@@ -417,30 +346,32 @@ function Schedule() {
     return null;
   };
 
+  // Only allow editing events for the user's department (unless admin)
   const canEditEvent = (event) => {
     if (user?.type === 'Administrator') return true;
     if (user?.type === 'OfficeUser') {
-      return (event.participants || []).includes(user.office);
+      // Allow edit if the event's participants include the user's office
+      return event.participants && event.participants.includes(user.office);
     }
-    return (event.department || []).includes(user?.type);
+    return event.department && event.department.includes(user?.type);
   };
 
+  // Only allow deleting events for the user's department (unless admin), or for OfficeUser their own office
   const canDeleteEvent = (event) => {
     if (user?.type === 'Administrator') return true;
     if (user?.type === 'OfficeUser') {
-      return (event.participants || []).includes(user.office);
+      return event.participants && event.participants.includes(user.office);
     }
-    return (event.department || []).includes(user?.type);
+    return event.department && event.department.includes(user?.type);
   };
 
   const handleDelete = async (id) => {
     toast.dismiss();
     try {
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/events/${id}`);
+        
       toast.success('Event deleted successfully!');
-      await fetchEvents();
+      fetchEvents();
     } catch (err) {
-      console.error('Failed to delete', err);
       toast.error('Failed to delete event.');
     }
   };
@@ -452,6 +383,7 @@ function Schedule() {
           Officer: {user?.office}
         </div>
       )}
+      {/* Professional Schedule Header */}
       <div className="schedule-header logout-relative">
         {user?.type === 'OfficeUser' && (
           <button className="logout-btn logout-top-right" onClick={handleLogout}>
@@ -469,7 +401,7 @@ function Schedule() {
           </div>
           <hr className="filter-hr" />
         </div>
-        <button className="add-entry-btn full-width-mobile" style={{ marginTop: 8 }} onClick={() => {
+        <button className="add-entry-btn full-width-mobile" style={{marginTop: 8}} onClick={() => {
           if (user?.type === 'OfficeUser') {
             setFormData({
               program: '',
@@ -490,7 +422,8 @@ function Schedule() {
           New Entry
         </button>
       </div>
-
+      {/* End Professional Schedule Header */}
+      {/* Calendar */}
       <Calendar
         onChange={(selectedDate) => { setDate(selectedDate); setShowTable(true); }}
         value={date}
@@ -498,6 +431,7 @@ function Schedule() {
       />
       <p className="selected-date" style={{ marginTop: 0, marginBottom: 16, textAlign: 'center' }}>Selected Date: <strong>{date.toDateString()}</strong></p>
 
+      {/* Event Table */}
       {showTable && eventsForSelectedDate.length > 0 && (
         <div className="event-table-wrapper" onClick={() => setShowTable(false)}>
           <div className={`event-table-modal${sidebarVisible === false ? ' sidebar-hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
@@ -521,32 +455,32 @@ function Schedule() {
                   <tr key={event.id}>
                     <td>{event.program}</td>
                     <td>
-                      <div>{formatDate(event.start_date || (event.startISO && event.startISO.slice(0,10)))}</div>
-                      <div>{formatTime(event.start_time || (event.startISO && event.startISO.slice(11,19)))}</div>
+                      <div>{formatDate(event.start_date)}</div>
+                      <div>{formatTime(event.start_time)}</div>
                     </td>
                     <td>
-                      <div>{formatDate(event.end_date || (event.endISO && event.endISO.slice(0,10)))}</div>
-                      <div>{formatTime(event.end_time || (event.endISO && event.endISO.slice(11,19)))}</div>
+                      <div>{formatDate(event.end_date)}</div>
+                      <div>{formatTime(event.end_time)}</div>
                     </td>
                     <td>{event.purpose}</td>
-                    <td>{(event.participants || []).join(', ')}</td>
-                    <td>{(event.department || []).join(', ')}</td>
+                    <td>{event.participants?.join(', ')}</td>
+                    <td>{event.department?.join(', ')}</td>
                     <td>
                       <span className="status-badge">
-                        {event.status ? (event.status.charAt(0).toUpperCase() + event.status.slice(1)) : ''}
+                        {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
                       </span>
                     </td>
                     <td>
-                      {canEditEvent(event) && <button
-                        className="edit-btn"
+                      {canEditEvent(event) && <button 
+                        className="edit-btn" 
                         style={{ fontWeight: 'bold', color: 'black', background: 'white', border: '2px solid #007bff' }}
                         onClick={() => handleEdit(event)}
                         disabled={isSubmitting}
                       >
                         Edit
                       </button>}
-                      {canDeleteEvent(event) && <button
-                        className="delete-btn"
+                      {canDeleteEvent(event) && <button 
+                        className="delete-btn" 
                         style={{ fontWeight: 'bold', color: 'black', background: 'white', border: '2px solid #dc3545' }}
                         onClick={() => handleDelete(event.id)}
                         disabled={isSubmitting}
@@ -562,6 +496,7 @@ function Schedule() {
         </div>
       )}
 
+      {/* Form Modal */}
       {showForm && (
         <div className="event-form-overlay" onClick={() => setShowForm(false)}>
           <form className="event-form" onClick={(e) => e.stopPropagation()} onSubmit={handleAddOrUpdate}>
@@ -587,6 +522,7 @@ function Schedule() {
               </button>
             </div>
             <div className="form-top-right">
+              {/* Department and Participants fields for non-OfficeUser */}
               {user?.type !== 'OfficeUser' && (
                 <div className="form-col">
                   <label>Department</label>
@@ -601,6 +537,7 @@ function Schedule() {
                     onChange={(selected) => setFormData({ ...formData, participants: selected })} />
                 </div>
               )}
+              {/* For OfficeUser, show department and office as disabled fields */}
               {user?.type === 'OfficeUser' && (
                 <>
                   <div className="form-col">
@@ -649,6 +586,7 @@ function Schedule() {
         </div>
       )}
 
+      {/* Tooltip for day details */}
       {hoveredDay && hoveredEvents.length > 0 && (
         <div
           className="calendar-tooltip"
@@ -672,10 +610,10 @@ function Schedule() {
             {hoveredEvents.map((event, i) => (
               <li key={i} style={{ marginBottom: '10px', borderBottom: '1px solid #eee', paddingBottom: '6px' }}>
                 <div><b>Program:</b> {event.program}</div>
-                <div><b>Time:</b> {formatDate(event.start_date || (event.startISO && event.startISO.slice(0,10)))} {formatTime(event.start_time || (event.startISO && event.startISO.slice(11,19)))} - {formatDate(event.end_date || (event.endISO && event.endISO.slice(0,10)))} {formatTime(event.end_time || (event.endISO && event.endISO.slice(11,19)))}</div>
+                <div><b>Time:</b> {formatDate(event.start_date)} {formatTime(event.start_time)} - {formatDate(event.end_date)} {formatTime(event.end_time)}</div>
                 <div><b>Purpose:</b> {event.purpose}</div>
-                <div><b>Participants:</b> {(event.participants || []).join(', ')}</div>
-                <div><b>Department:</b> {(event.department || []).join(', ')}</div>
+                <div><b>Participants:</b> {event.participants?.join(', ')}</div>
+                <div><b>Department:</b> {event.department?.join(', ')}</div>
                 <div><b>Status:</b> {event.status}</div>
               </li>
             ))}
