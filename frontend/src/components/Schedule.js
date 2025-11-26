@@ -337,17 +337,20 @@ const handleAddOrUpdate = async (e) => {
     }
     return event.department && event.department.includes(user?.type);
   };
+const handleDelete = async (id) => {
+  toast.dismiss();
+  
+  if (!window.confirm('Are you sure you want to delete this event?')) return;
 
-  const handleDelete = async (id) => {
-    toast.dismiss();
-    try {
-        
-      toast.success('Event deleted successfully!');
-      fetchEvents();
-    } catch (err) {
-      toast.error('Failed to delete event.');
-    }
-  };
+  try {
+    await axios.delete(`${process.env.REACT_APP_API_URL}/api/events/${id}`);
+    toast.success('Event deleted successfully!');
+    fetchEvents(); // refresh events list
+  } catch (err) {
+    console.error(err);
+    toast.error('Failed to delete event.');
+  }
+};
 
   return (
     <div className="schedule-container">
