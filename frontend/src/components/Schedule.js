@@ -152,95 +152,68 @@ function Schedule() {
 
   const getDateTime = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}`);
 
-  const handleAddOrUpdate = async (e) => {
-    e.preventDefault();
-    toast.dismiss();
-    setIsSubmitting(true);
+const handleAddOrUpdate = async (e) => {
+  e.preventDefault();
+  toast.dismiss();
+  setIsSubmitting(true);
 
-    const payload = {
-      ...formData,
-      participants: user?.type === 'OfficeUser'
-        ? [user.office]
-        : formData.participants.map(p => p.value),
-      department: user?.type === 'OfficeUser'
-        ? [user.department]
-        : formData.department.map(d => d.value),
-      created_by: user?.email || 'Unknown'
-    };
+  try {
+    // Ensure participants & department arrays
+    const payloadParticipants = user?.type === 'OfficeUser'
+      ? [user.office]
+      : formData.participants.map(p => p.value);
 
-    if (!payload.participants.length || !payload.department.length) {
+    const payloadDepartments = user?.type === 'OfficeUser'
+      ? [user.department]
+      : formData.department.map(d => d.value);
+
+    if (!payloadParticipants.length || !payloadDepartments.length) {
       return toast.error('Please select at least one department and one participant.');
     }
 
-    const payloadParticipants = payload.participants.map(p => p.trim().toLowerCase());
-    const newStart = getDateTime(payload.start_date, payload.start_time);
-    const newEnd = getDateTime(payload.end_date, payload.end_time);
-
-    // Robust office conflict check
-    const hasOfficeConflict = events.some(event => {
-      if (editMode && event.id === editingId) return false;
-      const eventStart = getDateTime(event.start_date, event.start_time);
-      const eventEnd = getDateTime(event.end_date, event.end_time);
-      const overlaps = newStart < eventEnd && newEnd > eventStart;
-
-      // Always treat participants as array of normalized strings
-      let eventParticipants = [];
-      if (Array.isArray(event.participants)) {
-        eventParticipants = event.participants;
-      } else if (typeof event.participants === 'string') {
-        try {
-          const parsed = JSON.parse(event.participants);
-          eventParticipants = Array.isArray(parsed) ? parsed : [event.participants];
-        } catch {
-          eventParticipants = [event.participants];
-        }
-      }
-      const normalizedEventParticipants = eventParticipants.map(p => p.trim().toLowerCase());
-      const officeConflict = normalizedEventParticipants.some(p => payloadParticipants.includes(p));
-      return overlaps && officeConflict;
-    });
-
-    if (hasOfficeConflict) {
-      toast.error('Conflict: A selected office is already booked during the selected date & time range.');
-      return;
+    // Handle end time crossing midnight
+    let start = new Date(`${formData.start_date}T${formData.start_time}`);
+    let end = new Date(`${formData.end_date}T${formData.end_time}`);
+    if (end <= start) {
+      end = new Date(end.getTime() + 24*60*60*1000); // add 1 day
     }
 
-    try {
-      if (editMode) {
-            await axios.put(
-  `${process.env.REACT_APP_API_URL}/api/events/${editingId}`,
-  payload
-);
+    const payload = {
+      program: formData.program,
+      start_date: formData.start_date,
+      start_time: formData.start_time,
+      end_date: formData.end_date,
+      end_time: formData.end_time,
+      purpose: formData.purpose,
+      participants: payloadParticipants,
+      department: payloadDepartments,
+      created_by: user?.email || 'Unknown'
+    };
 
-        toast.success('Event updated successfully!');
-      } else {
-            await axios.post(
-  `${process.env.REACT_APP_API_URL}/api/events`,
-  payload
-);
-
-        toast.success('Event added successfully!');
-      }
-      fetchEvents();
-      setShowForm(false);
-      setEditMode(false);
-      resetForm();
-    } catch (err) {
-      const conflictMsg = 'Conflict: A selected office is already booked during the selected date & time range.';
-      if (
-        err.response &&
-        err.response.data &&
-        err.response.data.error &&
-        err.response.data.error.includes('selected office is already booked')
-      ) {
-        toast.error(conflictMsg);
-      } else {
-        toast.error('Failed to save event.');
-      }
-    } finally {
-      setIsSubmitting(false);
+    if (editMode) {
+      await axios.put(`${process.env.REACT_APP_API_URL}/api/events/${editingId}`, payload);
+      toast.success('Event updated successfully!');
+    } else {
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/events`, payload);
+      toast.success('Event added successfully!');
     }
-  };
+
+    fetchEvents();
+    resetForm();
+    setShowForm(false);
+    setEditMode(false);
+
+  } catch (err) {
+    console.error(err);
+    if (err.response?.status === 409) {
+      toast.error('Conflict: Participant already booked during selected time.');
+    } else {
+      toast.error('Failed to save event.');
+    }
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   const handleEdit = (event) => {
     setFormData({
