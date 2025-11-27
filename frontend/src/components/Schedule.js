@@ -260,6 +260,7 @@ function Schedule() {
   // ----------------------------
   return (
     <div className="schedule-container">
+      {/* Header */}
       {user?.type === 'OfficeUser' && (
         <div style={{ textAlign: 'right', fontWeight: 'bold', marginBottom: '10px' }}>
           Officer: {user?.office}
@@ -427,51 +428,90 @@ function Schedule() {
 
       {/* Add/Edit Event Form Modal */}
       {showForm && (
-        <div className="form-modal-wrapper" onClick={() => setShowForm(false)}>
-          <div className="form-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{editMode ? 'Edit Event' : 'New Event'}</h3>
+        <div
+          className="event-form-overlay"
+          onClick={() => setShowForm(false)}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000
+          }}
+        >
+          <form
+            className="event-form"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => { e.preventDefault(); handleSubmitForm(); }}
+            style={{
+              background: 'white',
+              padding: '24px',
+              borderRadius: '8px',
+              maxWidth: '700px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.3)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>{editMode ? 'Edit Event' : 'Add New Event'}</h3>
+              <button type="button" onClick={() => setShowForm(false)} style={{ fontSize: '1.5rem', border: 'none', background: 'none', cursor: 'pointer', color: '#888' }}>×</button>
+            </div>
 
-            <label>Program:</label>
-            <input value={formData.program} onChange={(e) => handleFormChange('program', e.target.value)} />
+            <label>Program Name</label>
+            <input value={formData.program} onChange={(e) => handleFormChange('program', e.target.value)} required />
 
-            <label>Purpose:</label>
-            <input value={formData.purpose} onChange={(e) => handleFormChange('purpose', e.target.value)} />
+            <label>Purpose</label>
+            <textarea value={formData.purpose} onChange={(e) => handleFormChange('purpose', e.target.value)} required />
 
-            <label>Start Date:</label>
-            <input type="date" value={formData.start_date} onChange={(e) => handleFormChange('start_date', e.target.value)} />
+            <div style={{ display: 'flex', gap: '12px', marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label>Start Date</label>
+                <input type="date" value={formData.start_date} onChange={(e) => handleFormChange('start_date', e.target.value)} required />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Start Time</label>
+                <input type="time" value={formData.start_time} onChange={(e) => handleFormChange('start_time', e.target.value)} required />
+              </div>
+            </div>
 
-            <label>Start Time:</label>
-            <input type="time" value={formData.start_time} onChange={(e) => handleFormChange('start_time', e.target.value)} />
+            <div style={{ display: 'flex', gap: '12px', marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label>End Date</label>
+                <input type="date" value={formData.end_date} onChange={(e) => handleFormChange('end_date', e.target.value)} required />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>End Time</label>
+                <input type="time" value={formData.end_time} onChange={(e) => handleFormChange('end_time', e.target.value)} required />
+              </div>
+            </div>
 
-            <label>End Date:</label>
-            <input type="date" value={formData.end_date} onChange={(e) => handleFormChange('end_date', e.target.value)} />
-
-            <label>End Time:</label>
-            <input type="time" value={formData.end_time} onChange={(e) => handleFormChange('end_time', e.target.value)} />
-
-            <label>Department:</label>
+            <label>Departments</label>
             <Select
               options={departments.map(d => ({ label: d, value: d }))}
               value={formData.department}
               onChange={(selected) => handleFormChange('department', selected)}
               isMulti
+              placeholder="Select department(s)"
             />
 
-            <label>Participants:</label>
+            <label>Participants</label>
             <Select
               options={categories.map(c => ({ label: c.name, value: c.name }))}
               value={formData.participants}
               onChange={(selected) => handleFormChange('participants', selected)}
               isMulti
+              placeholder="Select participant(s)"
             />
 
-            <div className="form-buttons">
-              <button onClick={handleSubmitForm} disabled={isSubmitting}>
-                {editMode ? 'Update' : 'Create'}
-              </button>
-              <button onClick={() => setShowForm(false)}>Cancel</button>
+            <div style={{ marginTop: 20, display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button type="submit" disabled={isSubmitting}>{editMode ? 'Update' : 'Create'}</button>
+              <button type="button" onClick={() => setShowForm(false)}>Cancel</button>
             </div>
-          </div>
+          </form>
         </div>
       )}
 
