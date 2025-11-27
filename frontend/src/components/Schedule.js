@@ -59,17 +59,20 @@ function Schedule() {
     department: []
   });
 
+  // 1. LOAD USER (With Fallback)
   useEffect(() => {
     try {
       const storedUser = JSON.parse(localStorage.getItem('user'));
       setUser(storedUser);
 
       if (storedUser?.type === 'OfficeUser') {
-        // FIX 1: Map to .position instead of .office
+        // FIX: Check position OR office to prevent crash
+        const userPos = storedUser.position || storedUser.office || 'Unknown';
+        
         setFormData(prev => ({
           ...prev,
           department: [{ label: storedUser.department, value: storedUser.department }],
-          participants: [{ label: storedUser.position, value: storedUser.position }]
+          participants: [{ label: userPos, value: userPos }]
         }));
       }
       document.body.style.overflow = storedUser?.type === 'OfficeUser' ? 'auto' : 'hidden';
@@ -187,7 +190,10 @@ function Schedule() {
       try {
         const dRes = await axios.get(`${process.env.REACT_APP_API_URL}/api/department`);
         setDepartments(dRes.data.map(d => d.department));
+        
         const cRes = await axios.get(`${process.env.REACT_APP_API_URL}/api/categories`);
+        // Debug check to ensure we are getting data
+        console.log("Categories fetched:", cRes.data); 
         setCategories(cRes.data);
       } catch (e) { console.error(e); }
     };
@@ -221,9 +227,11 @@ function Schedule() {
     setIsSubmitting(true);
 
     try {
-      // FIX 2: Use user.position here too
+      // FIX: Handle fallback for User Position
+      const userPosition = user?.position || user?.office;
+
       const payloadParticipants = user?.type === 'OfficeUser'
-        ? [user.position]
+        ? [userPosition]
         : formData.participants.map(p => p.value);
 
       const payloadDepartments = user?.type === 'OfficeUser'
@@ -292,8 +300,8 @@ function Schedule() {
   const canEditEvent = (event) => {
     if (user?.type === 'Administrator') return true;
     if (user?.type === 'OfficeUser') {
-      // FIX 3: Check against user.position
-      return event.participants && event.participants.includes(user.position);
+      const userPos = user.position || user.office;
+      return event.participants && event.participants.includes(userPos);
     }
     return event.department && event.department.includes(user?.type);
   };
@@ -301,8 +309,8 @@ function Schedule() {
   const canDeleteEvent = (event) => {
     if (user?.type === 'Administrator') return true;
     if (user?.type === 'OfficeUser') {
-      // FIX 4: Check against user.position
-      return event.participants && event.participants.includes(user.position);
+      const userPos = user.position || user.office;
+      return event.participants && event.participants.includes(userPos);
     }
     return event.department && event.department.includes(user?.type);
   };
@@ -328,9 +336,14 @@ function Schedule() {
     formData.department.some(d => d.value === cat.department.trim())
   );
 
-  // FIX 5: Map 'cat.position' instead of 'cat.office' for the dropdown
+  // FIX: Map with fallback so participants show up even if data is mixed
   const participantOptions = filteredCategories
-    .map(cat => ({ label: cat.position, value: cat.position }));
+    .map(cat => {
+      // Use position (new) OR office (old)
+      const label = cat.position || cat.office || 'Unknown';
+      return { label: label, value: label };
+    })
+    .filter(opt => opt.value !== 'Unknown'); // clean up
 
 
   // --- HANDLERS FOR TOOLTIP ---
@@ -392,8 +405,8 @@ function Schedule() {
     <div className="schedule-container">
       {user?.type === 'OfficeUser' && (
         <div style={{ textAlign: 'right', fontWeight: 'bold', marginBottom: '10px' }}>
-          {/* FIX 6: Display Position */}
-          Officer: {user?.position}
+          {/* FIX: Display Position with fallback */}
+          Officer: {user?.position || user?.office}
         </div>
       )}
       <div className="schedule-header logout-relative">
@@ -415,6 +428,7 @@ function Schedule() {
         </div>
         <button className="add-entry-btn full-width-mobile" style={{ marginTop: 8 }} onClick={() => {
           if (user?.type === 'OfficeUser') {
+            const userPos = user.position || user.office;
             setFormData({
               program: '',
               start_date: '',
@@ -423,8 +437,7 @@ function Schedule() {
               end_time: '',
               purpose: '',
               department: [{ label: user.department, value: user.department }],
-              // FIX 7: Use user.position for OfficeUser default
-              participants: [{ label: user.position, value: user.position }]
+              participants: [{ label: userPos, value: userPos }]
             });
           } else {
             resetForm();
@@ -553,9 +566,9 @@ function Schedule() {
                     <input type="text" value={user.department} disabled />
                   </div>
                   <div className="form-col">
-                    {/* FIX 8: Label Position and use user.position */}
                     <label>Position</label>
-                    <input type="text" value={user.position} disabled />
+                    {/* FIX: Fallback to office if position is missing */}
+                    <input type="text" value={user.position || user.office} disabled />
                   </div>
                 </>
               )}
