@@ -481,6 +481,74 @@ app.delete('/api/categories/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete category' });
   }
 });
+
+// ==========================================
+// OPTION MANAGEMENT ROUTES (For Manage Options Modal)
+// ==========================================
+
+// 1. GET ALL OPTIONS
+app.get('/api/options', async (req, res) => {
+  try {
+    const typesRes = await pool.query('SELECT type_name FROM personnel_types ORDER BY type_name');
+    const posRes = await pool.query('SELECT type_name, position_name FROM personnel_positions ORDER BY position_name');
+    
+    const positions = {};
+    typesRes.rows.forEach(r => positions[r.type_name] = []);
+    posRes.rows.forEach(r => {
+      if (positions[r.type_name]) positions[r.type_name].push(r.position_name);
+    });
+
+    res.json({ types: typesRes.rows.map(r => r.type_name), positions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. ADD NEW TYPE
+app.post('/api/options/type', async (req, res) => {
+  const { type_name } = req.body;
+  try {
+    await pool.query('INSERT INTO personnel_types (type_name) VALUES ($1)', [type_name]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: 'Type already exists' });
+  }
+});
+
+// 3. DELETE TYPE
+app.delete('/api/options/type/:name', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM personnel_types WHERE type_name = $1', [req.params.name]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
+
+// 4. ADD NEW POSITION
+app.post('/api/options/position', async (req, res) => {
+  const { type_name, position_name } = req.body;
+  try {
+    await pool.query('INSERT INTO personnel_positions (type_name, position_name) VALUES ($1, $2)', [type_name, position_name]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: 'Position already exists' });
+  }
+});
+
+// 5. DELETE POSITION
+app.delete('/api/options/position', async (req, res) => {
+  const { type_name, position_name } = req.body;
+  try {
+    await pool.query('DELETE FROM personnel_positions WHERE type_name = $1 AND position_name = $2', [type_name, position_name]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
+
 // GET all events for frontend
 app.get('/api/events', async (req, res) => {
   try {
