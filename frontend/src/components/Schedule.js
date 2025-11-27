@@ -119,20 +119,26 @@ function Schedule() {
   // Helper to get exact datetime for overlap checks (keeps original behavior)
   const getDateTime = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}`);
 
-    const updateEventStatuses = useCallback(() => {
-    const now = new Date();
-    setEvents(prevEvents =>
-      prevEvents.map(event => {
-        const start = getDateTime(event.start_date, event.start_time);
-        const end = getDateTime(event.end_date, event.end_time);
-        let status = 'upcoming';
-        if (now >= start && now <= end) status = 'ongoing';
-        else if (now > end) status = 'ended';
-        return { ...event, status };
-      })
-    );
-  }, []);
+ const fetchEvents = useCallback(async () => {
+  try {
+    const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/events`);
+    const eventsWithParsedData = res.data.map(event => {
+      // parsing participants & department
+      const participants = event.participants ? JSON.parse(event.participants) : [];
+      const department = event.department ? JSON.parse(event.department) : [];
+      return { ...event, participants, department };
+    });
+    setEvents(eventsWithParsedData);
 
+    // Update status after loading events
+    updateEventStatuses();
+  } catch (err) {
+    console.error(err);
+    toast.error('Failed to load events.');
+  }
+}, [updateEventStatuses]);
+
+  
     // Your existing useEffects (fetchEvents, WebSocket, etc.)
   useEffect(() => {
     fetchEvents();
@@ -141,39 +147,6 @@ function Schedule() {
     return () => clearInterval(interval);
   }, [fetchEvents, updateEventStatuses]);
 
-  // ----------------------------
-  // Fetching & normalization
-  // ----------------------------
-  const fetchEvents = useCallback(async () => {
-    try {
-      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/events`);
-      const eventsWithParsedData = res.data.map(event => {
-        const participants = typeof event.participants === 'string'
-          ? (event.participants ? JSON.parse(event.participants) : [])
-          : (event.participants || []);
-
-        const department = typeof event.department === 'string'
-          ? (event.department ? JSON.parse(event.department) : [])
-          : (event.department || []);
-
-        // normalized date-only fields (local midnight)
-        const start_date_only = toLocalDateOnly(event.start_date);
-        const end_date_only = toLocalDateOnly(event.end_date);
-
-        return {
-          ...event,
-          participants,
-          department,
-          start_date_only,
-          end_date_only
-        };
-      });
-      setEvents(eventsWithParsedData);
-    } catch (err) {
-      console.error('Failed to load events:', err);
-      toast.error('Failed to load events.');
-    }
-  }, []);
 
   useEffect(() => {
     const socket = io(process.env.REACT_APP_API_URL);
