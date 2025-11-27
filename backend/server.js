@@ -504,6 +504,36 @@ app.get('/api/options', async (req, res) => {
   }
 });
 
+// ==========================================
+// OPTIONS MANAGEMENT ROUTES (Fixes 404 Error)
+// ==========================================
+
+// 1. GET ALL OPTIONS (Populates the dropdowns)
+app.get('/api/options', async (req, res) => {
+  try {
+    const typesRes = await pool.query('SELECT type_name FROM personnel_types ORDER BY type_name');
+    const posRes = await pool.query('SELECT type_name, position_name FROM personnel_positions ORDER BY position_name');
+    
+    // Format data: { "Teaching": ["Teacher I", ...], "Non-Teaching": [...] }
+    const positions = {};
+    
+    // Initialize arrays
+    typesRes.rows.forEach(r => positions[r.type_name] = []);
+    
+    // Fill arrays
+    posRes.rows.forEach(r => {
+      if (positions[r.type_name]) {
+        positions[r.type_name].push(r.position_name);
+      }
+    });
+
+    res.json({ types: typesRes.rows.map(r => r.type_name), positions });
+  } catch (err) {
+    console.error('Options Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 2. ADD NEW TYPE
 app.post('/api/options/type', async (req, res) => {
   const { type_name } = req.body;
@@ -511,7 +541,6 @@ app.post('/api/options/type', async (req, res) => {
     await pool.query('INSERT INTO personnel_types (type_name) VALUES ($1)', [type_name]);
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
     res.status(400).json({ error: 'Type already exists' });
   }
 });
@@ -533,7 +562,6 @@ app.post('/api/options/position', async (req, res) => {
     await pool.query('INSERT INTO personnel_positions (type_name, position_name) VALUES ($1, $2)', [type_name, position_name]);
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
     res.status(400).json({ error: 'Position already exists' });
   }
 });
