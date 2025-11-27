@@ -488,42 +488,53 @@ app.get('/api/events', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
-
 // 1️⃣ GET all events
+// Updated for PostgreSQL syntax (::text casting and LOCALTIMESTAMP)
 app.get('/api/events', async (req, res) => {
   try {
     const sql = `
       SELECT id, program,
         start_date,
-        TO_CHAR(start_time, 'HH24:MI:SS') AS start_time,
+        TO_CHAR(start_time::time, 'HH24:MI:SS') AS start_time,
         end_date,
-        TO_CHAR(end_time, 'HH24:MI:SS') AS end_time,
-        purpose, participants, department, status
+        TO_CHAR(end_time::time, 'HH24:MI:SS') AS end_time,
+        purpose, participants, department,
+        CASE
+            WHEN (end_date::text || ' ' || end_time::text)::timestamp < LOCALTIMESTAMP THEN 'ended'
+            WHEN (start_date::text || ' ' || start_time::text)::timestamp <= LOCALTIMESTAMP 
+                 AND (end_date::text || ' ' || end_time::text)::timestamp >= LOCALTIMESTAMP THEN 'ongoing'
+            ELSE 'upcoming'
+        END as status
       FROM schedule_events
       ORDER BY start_date, start_time
     `;
     const { rows } = await pool.query(sql);
 
     const events = rows.map(event => {
-      const participants = normalizeParticipants(event.participants);
-      const department = safeJSONParse(event.department);
-
-      const start = event.start_date && event.start_time
-        ? `${event.start_date}T${event.start_time}`  // ISO string, local time
-        : null;
-      const end = event.end_date && event.end_time
-        ? `${event.end_date}T${event.end_time}`
-        : null;
+      // Helper for safe JSON parsing
+      const safeParse = (val) => {
+          if (Array.isArray(val)) return val;
+          if (typeof val === 'string') {
+              try { return JSON.parse(val); } catch { return [val]; }
+          }
+          return [];
+      };
 
       return { 
         id: event.id,
+        program: event.program,
         title: event.program,
-        start,
-        end,
-        color: event.status === 'active' ? 'green'
-              : event.status === 'upcoming' ? 'blue'
-              : 'gray',
-        extendedProps: { purpose: event.purpose, participants, department, status: event.status }
+        start_date: event.start_date, // Postgres returns Date object or string depending on config
+        start_time: event.start_time,
+        end_date: event.end_date,
+        end_time: event.end_time,
+        participants: safeParse(event.participants),
+        department: safeParse(event.department),
+        purpose: event.purpose,
+        status: event.status, // Uses the SQL Calculated status
+        color: event.status === 'ongoing' ? '#28a745'
+             : event.status === 'upcoming' ? '#007bff'
+             : '#6c757d'
       };
     });
 
@@ -534,203 +545,208 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
-// POST /api/events - Add new event (improved conflict reporting)
+// 2️⃣ POST /api/events - Add new event
 app.post('/api/events', async (req, res) => {
   const {
     program, start_date, start_time, end_date, end_time,
     purpose, participants, department, created_by
   } = req.body;
 
-  if (!program || !start_date || !start_time || !end_date || !end_time || !purpose || !participants?.length || !department?.length) {
+  if (!program || !start_date || !start_time || !end_date || !end_time || !purpose) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
-  // Normalize participants array
-  const payloadParticipants = Array.isArray(participants) ? participants : (typeof participants === 'string' ? JSON.parse(participants) : []);
-  const payloadDepartments = Array.isArray(department) ? department : (typeof department === 'string' ? JSON.parse(department) : []);
+  // Normalize inputs
+  const payloadParticipants = Array.isArray(participants) ? participants : [];
+  const payloadDepartments = Array.isArray(department) ? department : [];
 
-  // Build ISO datetime strings
-  let newStartISO = `${start_date}T${start_time}`;
-  let newEndISO = `${end_date}T${end_time}`;
-
-  // Make JS Date objects to handle overnight end times
-  let newStart = new Date(newStartISO);
-  let newEnd = new Date(newEndISO);
-
-  // If end <= start, assume event crosses midnight => add 1 day to end
+  // Handle Midnight Crossing (JS Logic)
+  let newStart = new Date(`${start_date}T${start_time}`);
+  let newEnd = new Date(`${end_date}T${end_time}`);
+  
+  // If end time is before start time, add 1 day to end date
   if (newEnd <= newStart) {
     newEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
-    newEndISO = newEnd.toISOString().slice(0,19); // keep yyyy-mm-ddTHH:MM:SS
   }
+  
+  const finalEndDate = newEnd.toISOString().split('T')[0];
+  const queryStart = `${start_date} ${start_time}`;
+  const queryEnd = `${finalEndDate} ${end_time}`;
 
   try {
-    // Query DB for ANY events that overlap the time window (timestamp-safe)
+    // Check Conflicts (PostgreSQL Syntax)
+    // We cast inputs to ::timestamp to compare against DB columns constructed as timestamps
     const conflictQuery = `
       SELECT id, program, start_date, start_time, end_date, end_time, participants
       FROM schedule_events
       WHERE NOT (
-        (start_date || 'T' || start_time)::timestamp >= $2::timestamp
-        OR (end_date   || 'T' || end_time  )::timestamp <= $1::timestamp
+        (start_date::text || ' ' || start_time::text)::timestamp >= $2::timestamp
+        OR (end_date::text || ' ' || end_time::text)::timestamp <= $1::timestamp
       )
     `;
-    const conflictResult = await pool.query(conflictQuery, [newStart.toISOString().slice(0,19), newEnd.toISOString().slice(0,19)]);
+    
+    const conflictResult = await pool.query(conflictQuery, [queryStart, queryEnd]);
 
-    // Build list of conflicting events that share participants
+    // Check for matching participants in conflicting time slots
     const conflicts = [];
-
     for (const ev of conflictResult.rows) {
-      // normalize stored participants
       let evParticipants = [];
-      if (Array.isArray(ev.participants)) evParticipants = ev.participants;
-      else if (typeof ev.participants === 'string') {
-        try { evParticipants = JSON.parse(ev.participants); }
-        catch { evParticipants = [ev.participants]; }
-      }
-
-      const normalizedEvParticipants = evParticipants.map(p => String(p).trim().toLowerCase());
-      const normalizedPayloadParticipants = payloadParticipants.map(p => String(p).trim().toLowerCase());
-
-      const overlappingParticipants = normalizedPayloadParticipants.filter(p => normalizedEvParticipants.includes(p));
-
-      if (overlappingParticipants.length > 0) {
-        // compute DB event start/end ISO for clarity
-        const evStartISO = `${ev.start_date}T${ev.start_time}`;
-        const evEndISO = `${ev.end_date}T${ev.end_time}`;
-        conflicts.push({
-          eventId: ev.id,
-          program: ev.program,
-          start: evStartISO,
-          end: evEndISO,
-          conflictingParticipants: overlappingParticipants
-        });
+      try { evParticipants = typeof ev.participants === 'string' ? JSON.parse(ev.participants) : ev.participants; } 
+      catch { evParticipants = [ev.participants]; }
+      
+      const overlap = payloadParticipants.some(p => evParticipants.includes(p));
+      if (overlap) {
+        conflicts.push({ eventId: ev.id, program: ev.program });
       }
     }
 
     if (conflicts.length > 0) {
-      // Return 409 with structured conflict info
-      return res.status(409).json({
-        error: 'Conflict: One or more participants are already booked during the selected range.',
-        conflicts
-      });
+      return res.status(409).json({ error: 'Conflict: Participants already booked.', conflicts });
     }
 
-    // No conflicts — insert the event
+    // Determine Status
+    const now = new Date();
+    let initialStatus = 'upcoming';
+    if (now >= newStart && now <= newEnd) initialStatus = 'ongoing';
+    else if (now > newEnd) initialStatus = 'ended';
+
+    // Insert (Postgres uses $1, $2...)
     const insertQuery = `
       INSERT INTO schedule_events
         (program, start_date, start_time, end_date, end_time, purpose, participants, department, status, created_by)
       VALUES
-        ($1,$2,$3,$4,$5,$6,$7,$8,'upcoming',$9)
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING id
     `;
-    const insertParams = [
-      program, start_date, start_time, end_date, end_time,
-      purpose, JSON.stringify(payloadParticipants), JSON.stringify(payloadDepartments), created_by
+    
+    const insertValues = [
+      program, start_date, start_time, finalEndDate, end_time,
+      purpose, JSON.stringify(payloadParticipants), JSON.stringify(payloadDepartments),
+      initialStatus, created_by
     ];
 
-    const insertResult = await pool.query(insertQuery, insertParams);
+    const insertResult = await pool.query(insertQuery, insertValues);
 
-    // Notify via socket.io
-    io.emit('eventAdded', { eventId: insertResult.rows[0].id });
+    io.emit('statusUpdated');
+    return res.status(201).json({ message: 'Event added', eventId: insertResult.rows[0].id });
 
-    return res.status(201).json({
-      message: 'Event added successfully',
-      eventId: insertResult.rows[0].id
-    });
   } catch (err) {
     console.error('Error adding event:', err);
-    return res.status(500).json({ error: 'Database error while adding event.' });
+    return res.status(500).json({ error: 'Database error.' });
   }
 });
 
-
-// PATCH/PUT: Update an event
+// 3️⃣ PUT /api/events/:id - Update event
 app.put('/api/events/:id', async (req, res) => {
   const eventId = req.params.id;
   const { program, start_date, start_time, end_date, end_time, purpose, participants, department } = req.body;
 
-  // Validate all required fields
-  if (!program || !start_date || !start_time || !end_date || !end_time || !purpose || !participants?.length || !department?.length) {
-    return res.status(400).json({ error: 'All fields are required.' });
+  // Handle Midnight
+  let newStart = new Date(`${start_date}T${start_time}`);
+  let newEnd = new Date(`${end_date}T${end_time}`);
+  if (newEnd <= newStart) {
+    newEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
   }
-
-  const newStart = `${start_date} ${start_time}`;
-  const newEnd = `${end_date} ${end_time}`;
-  const payloadParticipants = JSON.stringify(participants);
+  const finalEndDate = newEnd.toISOString().split('T')[0];
+  const queryStart = `${start_date} ${start_time}`;
+  const queryEnd = `${finalEndDate} ${end_time}`;
 
   try {
-    // Check for overlapping events
+    // Check Conflicts (excluding current ID)
     const conflictQuery = `
-      SELECT * FROM schedule_events
+      SELECT participants FROM schedule_events
       WHERE id != $1
-      AND NOT ($2 >= end_date || $3 <= start_date)
+      AND NOT (
+        (start_date::text || ' ' || start_time::text)::timestamp >= $3::timestamp
+        OR (end_date::text || ' ' || end_time::text)::timestamp <= $2::timestamp
+      )
     `;
-    const conflictValues = [eventId, newStart, newEnd];
-    const conflictResult = await pool.query(conflictQuery, conflictValues);
-
-    // Check for participant conflicts
-    const hasConflict = conflictResult.rows.some(event => {
-      const eventParticipants = JSON.parse(event.participants);
-      return eventParticipants.some(p => participants.includes(p));
+    
+    const conflictResult = await pool.query(conflictQuery, [eventId, queryStart, queryEnd]);
+    
+    const hasConflict = conflictResult.rows.some(ev => {
+      let dbParticipants = [];
+      try { dbParticipants = JSON.parse(ev.participants); } catch { dbParticipants = []; }
+      return dbParticipants.some(p => participants.includes(p));
     });
 
     if (hasConflict) {
-      return res.status(409).json({
-        error: 'Conflict: A selected office/participant is already booked during the selected date & time range.'
-      });
+      return res.status(409).json({ error: 'Conflict: Time slot booked.' });
     }
 
-    // Update the event
+    // Determine Status
+    const now = new Date();
+    let status = 'upcoming';
+    if (now >= newStart && now <= newEnd) status = 'ongoing';
+    else if (now > newEnd) status = 'ended';
+
     const updateQuery = `
       UPDATE schedule_events
-      SET program = $1,
-          start_date = $2,
-          start_time = $3,
-          end_date = $4,
-          end_time = $5,
-          purpose = $6,
-          participants = $7,
-          department = $8
-      WHERE id = $9
+      SET program = $1, start_date = $2, start_time = $3, end_date = $4, end_time = $5,
+          purpose = $6, participants = $7, department = $8, status = $9
+      WHERE id = $10
       RETURNING *
     `;
+    
     const updateValues = [
-      program, start_date, start_time, end_date, end_time, purpose,
-      payloadParticipants, JSON.stringify(department), eventId
+      program, start_date, start_time, finalEndDate, end_time,
+      purpose, JSON.stringify(participants), JSON.stringify(department), status, eventId
     ];
 
     const updateResult = await pool.query(updateQuery, updateValues);
-    if (updateResult.rowCount === 0) {
-      return res.status(404).json({ error: 'Event not found.' });
-    }
+    
+    if (updateResult.rowCount === 0) return res.status(404).json({ error: 'Not found' });
 
-    res.json({ message: 'Event updated successfully', event: updateResult.rows[0] });
+    io.emit('statusUpdated');
+    res.json({ message: 'Updated', event: updateResult.rows[0] });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Database error while updating event.' });
+    res.status(500).json({ error: 'Update failed' });
   }
 });
 
-// DELETE an event
+// 4️⃣ DELETE event
 app.delete('/api/events/:id', async (req, res) => {
-  const eventId = req.params.id;
-
   try {
-    const deleteResult = await pool.query(
-      'DELETE FROM schedule_events WHERE id = $1 RETURNING id',
-      [eventId]
-    );
-
-    if (deleteResult.rowCount === 0) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-
-    res.json({ message: 'Event deleted successfully' });
+    const result = await pool.query('DELETE FROM schedule_events WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    
+    io.emit('statusUpdated');
+    res.json({ message: 'Deleted' });
   } catch (err) {
-    console.error('Delete failed:', err);
     res.status(500).json({ error: 'Delete failed' });
   }
 });
 
+// 5️⃣ AUTOMATIC STATUS UPDATER (PostgreSQL Logic)
+// Runs every 30 seconds
+setInterval(async () => {
+  try {
+    const sql = `
+      UPDATE schedule_events
+      SET status = CASE
+          WHEN (end_date::text || ' ' || end_time::text)::timestamp < LOCALTIMESTAMP THEN 'ended'
+          WHEN (start_date::text || ' ' || start_time::text)::timestamp <= LOCALTIMESTAMP 
+               AND (end_date::text || ' ' || end_time::text)::timestamp >= LOCALTIMESTAMP THEN 'ongoing'
+          ELSE 'upcoming'
+      END
+      WHERE status != CASE
+          WHEN (end_date::text || ' ' || end_time::text)::timestamp < LOCALTIMESTAMP THEN 'ended'
+          WHEN (start_date::text || ' ' || start_time::text)::timestamp <= LOCALTIMESTAMP 
+               AND (end_date::text || ' ' || end_time::text)::timestamp >= LOCALTIMESTAMP THEN 'ongoing'
+          ELSE 'upcoming'
+      END
+    `;
+    const result = await pool.query(sql);
+    
+    if (result.rowCount > 0) {
+      io.emit('statusUpdated');
+    }
+  } catch (err) {
+    console.error("Auto-status update failed:", err);
+  }
+}, 30000);
 // Helper to get department filter safely
 function getDepartmentFilter(department, userType, table = 'users') {
   if (!department || department === 'All') {
