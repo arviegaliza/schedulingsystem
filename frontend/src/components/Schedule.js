@@ -28,22 +28,7 @@ function Schedule() {
   const [hoveredEvents, setHoveredEvents] = useState([]);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
-  useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem('user'));
-    setUser(storedUser);
-
-    // If OfficeUser, pre-select department and participants
-    if (storedUser?.type === 'OfficeUser') {
-      setFormData(formData => ({
-        ...formData,
-        department: [{ label: storedUser.department, value: storedUser.department }],
-        participants: [{ label: storedUser.office, value: storedUser.office }]
-      }));
-    }
-
-    document.body.style.overflow = storedUser?.type === 'OfficeUser' ? 'auto' : 'hidden';
-  }, []);
-
+  // Make sure formData exists before effects that reference it
   const [formData, setFormData] = useState({
     program: '',
     start_date: '',
@@ -54,6 +39,27 @@ function Schedule() {
     participants: [],
     department: []
   });
+
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem('user'));
+    setUser(storedUser);
+
+    // If OfficeUser, pre-select department and participants
+    if (storedUser?.type === 'OfficeUser') {
+      setFormData(() => ({
+        program: '',
+        start_date: '',
+        start_time: '',
+        end_date: '',
+        end_time: '',
+        purpose: '',
+        department: [{ label: storedUser.department, value: storedUser.department }],
+        participants: [{ label: storedUser.office, value: storedUser.office }]
+      }));
+    }
+
+    document.body.style.overflow = storedUser?.type === 'OfficeUser' ? 'auto' : 'hidden';
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('user');
@@ -76,7 +82,7 @@ function Schedule() {
     if (!timeStr) return '';
     const [hours, minutes] = timeStr.split(':');
     const date = new Date();
-    date.setHours(parseInt(hours), parseInt(minutes));
+    date.setHours(parseInt(hours, 10), parseInt(minutes, 10));
     return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
@@ -84,19 +90,65 @@ function Schedule() {
     });
   };
 
+  // ----------------------------
+  // Date helpers (normalize to local date-only)
+  // ----------------------------
+  const toLocalDateOnly = (dateLike) => {
+    if (!dateLike) return null;
+    // Handle both "YYYY-MM-DD" and ISO full strings with time/offset
+    const d = new Date(dateLike);
+    if (!isNaN(d.getTime())) {
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+    // Fallback parse YYYY-MM-DD
+    const base = String(dateLike).split('T')[0];
+    const parts = base.split('-');
+    if (parts.length === 3) {
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    }
+    return null;
+  };
+
+  const isSameDateOnly = (a, b) => {
+    if (!a || !b) return false;
+    return a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+  };
+
+  // Helper to get exact datetime for overlap checks (keeps original behavior)
+  const getDateTime = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}`);
+
+  // ----------------------------
+  // Fetching & normalization
+  // ----------------------------
   const fetchEvents = useCallback(async () => {
     try {
-          const res = await axios.get(
-  `${process.env.REACT_APP_API_URL}/api/events`
-);
+      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/events`);
+      const eventsWithParsedData = res.data.map(event => {
+        const participants = typeof event.participants === 'string'
+          ? (event.participants ? JSON.parse(event.participants) : [])
+          : (event.participants || []);
 
-      const eventsWithParsedData = res.data.map(event => ({
-        ...event,
-        participants: typeof event.participants === 'string' ? JSON.parse(event.participants) : event.participants || [],
-        department: typeof event.department === 'string' ? JSON.parse(event.department) : event.department || [],
-      }));
+        const department = typeof event.department === 'string'
+          ? (event.department ? JSON.parse(event.department) : [])
+          : (event.department || []);
+
+        // normalized date-only fields (local midnight)
+        const start_date_only = toLocalDateOnly(event.start_date);
+        const end_date_only = toLocalDateOnly(event.end_date);
+
+        return {
+          ...event,
+          participants,
+          department,
+          start_date_only,
+          end_date_only
+        };
+      });
       setEvents(eventsWithParsedData);
     } catch (err) {
+      console.error('Failed to load events:', err);
       toast.error('Failed to load events.');
     }
   }, []);
@@ -111,24 +163,20 @@ function Schedule() {
 
   const fetchDepartments = useCallback(async () => {
     try {
-      const res = await axios.get(
-  `${process.env.REACT_APP_API_URL}/api/department`
-);
-
+      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/department`);
       setDepartments(res.data.map(d => d.department));
     } catch (err) {
+      console.error('Failed to load departments:', err);
       toast.error('Failed to load departments.');
     }
   }, []);
 
   const fetchCategories = useCallback(async () => {
     try {
-        const res = await axios.get(
-  `${process.env.REACT_APP_API_URL}/api/categories`
-);
-
+      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/categories`);
       setCategories(res.data);
     } catch (err) {
+      console.error('Failed to load categories:', err);
       toast.error('Failed to load categories.');
     }
   }, []);
@@ -150,78 +198,79 @@ function Schedule() {
     department: []
   });
 
-  const getDateTime = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}`);
+  // ----------------------------
+  // Create / Update Event
+  // ----------------------------
+  const handleAddOrUpdate = async (e) => {
+    e.preventDefault();
+    toast.dismiss();
+    setIsSubmitting(true);
 
-const handleAddOrUpdate = async (e) => {
-  e.preventDefault();
-  toast.dismiss();
-  setIsSubmitting(true);
+    try {
+      // Ensure participants & department arrays
+      const payloadParticipants = user?.type === 'OfficeUser'
+        ? [user.office]
+        : formData.participants.map(p => p.value);
 
-  try {
-    // Ensure participants & department arrays
-    const payloadParticipants = user?.type === 'OfficeUser'
-      ? [user.office]
-      : formData.participants.map(p => p.value);
+      const payloadDepartments = user?.type === 'OfficeUser'
+        ? [user.department]
+        : formData.department.map(d => d.value);
 
-    const payloadDepartments = user?.type === 'OfficeUser'
-      ? [user.department]
-      : formData.department.map(d => d.value);
+      if (!payloadParticipants.length || !payloadDepartments.length) {
+        setIsSubmitting(false);
+        return toast.error('Please select at least one department and one participant.');
+      }
 
-    if (!payloadParticipants.length || !payloadDepartments.length) {
-      return toast.error('Please select at least one department and one participant.');
+      // Handle end time crossing midnight
+      let start = new Date(`${formData.start_date}T${formData.start_time}`);
+      let end = new Date(`${formData.end_date}T${formData.end_time}`);
+      if (end <= start) {
+        end = new Date(end.getTime() + 24 * 60 * 60 * 1000); // add 1 day
+      }
+
+      const payload = {
+        program: formData.program,
+        start_date: formData.start_date,
+        start_time: formData.start_time,
+        end_date: formData.end_date,
+        end_time: formData.end_time,
+        purpose: formData.purpose,
+        participants: payloadParticipants,
+        department: payloadDepartments,
+        created_by: user?.email || 'Unknown'
+      };
+
+      if (editMode) {
+        await axios.put(`${process.env.REACT_APP_API_URL}/api/events/${editingId}`, payload);
+        toast.success('Event updated successfully!');
+      } else {
+        await axios.post(`${process.env.REACT_APP_API_URL}/api/events`, payload);
+        toast.success('Event added successfully!');
+      }
+
+      await fetchEvents(); // re-fetch to get normalized fields
+      resetForm();
+      setShowForm(false);
+      setEditMode(false);
+    } catch (err) {
+      console.error(err);
+      if (err.response?.status === 409) {
+        toast.error('Conflict: Participant already booked during selected time.');
+      } else {
+        toast.error('Failed to save event.');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-
-    // Handle end time crossing midnight
-    let start = new Date(`${formData.start_date}T${formData.start_time}`);
-    let end = new Date(`${formData.end_date}T${formData.end_time}`);
-    if (end <= start) {
-      end = new Date(end.getTime() + 24*60*60*1000); // add 1 day
-    }
-
-    const payload = {
-      program: formData.program,
-      start_date: formData.start_date,
-      start_time: formData.start_time,
-      end_date: formData.end_date,
-      end_time: formData.end_time,
-      purpose: formData.purpose,
-      participants: payloadParticipants,
-      department: payloadDepartments,
-      created_by: user?.email || 'Unknown'
-    };
-
-    if (editMode) {
-      await axios.put(`${process.env.REACT_APP_API_URL}/api/events/${editingId}`, payload);
-      toast.success('Event updated successfully!');
-    } else {
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/events`, payload);
-      toast.success('Event added successfully!');
-    }
-
-    fetchEvents();
-    resetForm();
-    setShowForm(false);
-    setEditMode(false);
-
-  } catch (err) {
-    console.error(err);
-    if (err.response?.status === 409) {
-      toast.error('Conflict: Participant already booked during selected time.');
-    } else {
-      toast.error('Failed to save event.');
-    }
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   const handleEdit = (event) => {
     setFormData({
       ...event,
       start_date: event.start_date,
-      start_time: event.start_time.slice(0, 5),
+      start_time: (event.start_time || '').slice(0, 5),
       end_date: event.end_date,
-      end_time: event.end_time.slice(0, 5),
+      end_time: (event.end_time || '').slice(0, 5),
       participants: (event.participants || []).map(p => ({ label: p, value: p })),
       department: (event.department || []).map(d => ({ label: d, value: d }))
     });
@@ -230,7 +279,42 @@ const handleAddOrUpdate = async (e) => {
     setShowForm(true);
   };
 
-  // Restrict department options for non-admin users
+  // ----------------------------
+  // Permission helpers
+  // ----------------------------
+  const canEditEvent = (event) => {
+    if (user?.type === 'Administrator') return true;
+    if (user?.type === 'OfficeUser') {
+      return event.participants && event.participants.includes(user.office);
+    }
+    return event.department && event.department.includes(user?.type);
+  };
+
+  const canDeleteEvent = (event) => {
+    if (user?.type === 'Administrator') return true;
+    if (user?.type === 'OfficeUser') {
+      return event.participants && event.participants.includes(user.office);
+    }
+    return event.department && event.department.includes(user?.type);
+  };
+
+  const handleDelete = async (id) => {
+    toast.dismiss();
+    if (!window.confirm('Are you sure you want to delete this event?')) return;
+
+    try {
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/events/${id}`);
+      toast.success('Event deleted successfully!');
+      fetchEvents(); // refresh events list
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to delete event.');
+    }
+  };
+
+  // ----------------------------
+  // Booking and availability logic (unchanged except using normalized fields where date-only is needed)
+  // ----------------------------
   const allowedDepartments = user?.type === 'Administrator' ? departments : user ? [user.type] : [];
   const departmentOptions = allowedDepartments
     .map(dept => ({ label: dept, value: dept }))
@@ -272,35 +356,21 @@ const handleAddOrUpdate = async (e) => {
       return isSelected || !unavailableParticipants.includes(opt.value);
     });
 
-  const eventsForSelectedDate = events.filter((event) => {
-    if (event.status === 'ended') return false;
-    const eventStartDate = new Date(event.start_date);
-    const eventEndDate = new Date(event.end_date);
-    const isInRange = eventStartDate <= date && eventEndDate >= date;
-    const matchesDept = selectedDept ? event.department?.includes(selectedDept) : true;
-    return isInRange && matchesDept;
-  });
-
-  const handleDayMouseEnter = (tileDate, events, e) => {
-    setHoveredDay(tileDate.toDateString());
-    setHoveredEvents(events);
-    setTooltipPos({ x: e.clientX, y: e.clientY });
-  };
-  const handleDayMouseLeave = () => {
-    setHoveredDay(null);
-    setHoveredEvents([]);
-  };
-
+  // ----------------------------
+  // Calendar matching & tooltip (uses date-only normalized fields)
+  // ----------------------------
   const tileContent = ({ date: tileDate, view }) => {
     if (view === 'month') {
+      const tileDateOnly = toLocalDateOnly(tileDate);
       const matches = events.filter(event => {
         if (event.status === 'ended') return false;
-        const eventStartDate = new Date(event.start_date);
-        const eventEndDate = new Date(event.end_date);
-        return eventStartDate <= tileDate &&
-          eventEndDate >= tileDate &&
-          (selectedDept ? event.department?.includes(selectedDept) : true);
+        const eventStart = event.start_date_only ?? toLocalDateOnly(event.start_date);
+        const eventEnd = event.end_date_only ?? toLocalDateOnly(event.end_date);
+        if (!eventStart || !eventEnd) return false;
+        return (tileDateOnly >= eventStart && tileDateOnly <= eventEnd)
+          && (selectedDept ? event.department?.includes(selectedDept) : true);
       });
+
       return (
         <div
           className="calendar-tile-content"
@@ -319,39 +389,32 @@ const handleAddOrUpdate = async (e) => {
     return null;
   };
 
-  // Only allow editing events for the user's department (unless admin)
-  const canEditEvent = (event) => {
-    if (user?.type === 'Administrator') return true;
-    if (user?.type === 'OfficeUser') {
-      // Allow edit if the event's participants include the user's office
-      return event.participants && event.participants.includes(user.office);
-    }
-    return event.department && event.department.includes(user?.type);
+  const eventsForSelectedDate = events.filter((event) => {
+    if (event.status === 'ended') return false;
+    const eventStart = event.start_date_only ?? toLocalDateOnly(event.start_date);
+    const eventEnd = event.end_date_only ?? toLocalDateOnly(event.end_date);
+    if (!eventStart || !eventEnd) return false;
+
+    const selectedDateOnly = toLocalDateOnly(date);
+    const matchesDate = (eventStart <= selectedDateOnly && eventEnd >= selectedDateOnly);
+    const matchesDept = selectedDept ? event.department?.includes(selectedDept) : true;
+    return matchesDate && matchesDept;
+  });
+
+  // tooltip handlers etc.
+  const handleDayMouseEnter = (tileDate, events, e) => {
+    setHoveredDay(tileDate.toDateString());
+    setHoveredEvents(events);
+    setTooltipPos({ x: e.clientX, y: e.clientY });
+  };
+  const handleDayMouseLeave = () => {
+    setHoveredDay(null);
+    setHoveredEvents([]);
   };
 
-  // Only allow deleting events for the user's department (unless admin), or for OfficeUser their own office
-  const canDeleteEvent = (event) => {
-    if (user?.type === 'Administrator') return true;
-    if (user?.type === 'OfficeUser') {
-      return event.participants && event.participants.includes(user.office);
-    }
-    return event.department && event.department.includes(user?.type);
-  };
-const handleDelete = async (id) => {
-  toast.dismiss();
-  
-  if (!window.confirm('Are you sure you want to delete this event?')) return;
-
-  try {
-    await axios.delete(`${process.env.REACT_APP_API_URL}/api/events/${id}`);
-    toast.success('Event deleted successfully!');
-    fetchEvents(); // refresh events list
-  } catch (err) {
-    console.error(err);
-    toast.error('Failed to delete event.');
-  }
-};
-
+  // ----------------------------
+  // JSX render
+  // ----------------------------
   return (
     <div className="schedule-container">
       {user?.type === 'OfficeUser' && (
@@ -377,7 +440,7 @@ const handleDelete = async (id) => {
           </div>
           <hr className="filter-hr" />
         </div>
-        <button className="add-entry-btn full-width-mobile" style={{marginTop: 8}} onClick={() => {
+        <button className="add-entry-btn full-width-mobile" style={{ marginTop: 8 }} onClick={() => {
           if (user?.type === 'OfficeUser') {
             setFormData({
               program: '',
@@ -443,20 +506,20 @@ const handleDelete = async (id) => {
                     <td>{event.department?.join(', ')}</td>
                     <td>
                       <span className="status-badge">
-                        {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
+                        {String(event.status || '').charAt(0).toUpperCase() + String(event.status || '').slice(1)}
                       </span>
                     </td>
                     <td>
-                      {canEditEvent(event) && <button 
-                        className="edit-btn" 
+                      {canEditEvent(event) && <button
+                        className="edit-btn"
                         style={{ fontWeight: 'bold', color: 'black', background: 'white', border: '2px solid #007bff' }}
                         onClick={() => handleEdit(event)}
                         disabled={isSubmitting}
                       >
                         Edit
                       </button>}
-                      {canDeleteEvent(event) && <button 
-                        className="delete-btn" 
+                      {canDeleteEvent(event) && <button
+                        className="delete-btn"
                         style={{ fontWeight: 'bold', color: 'black', background: 'white', border: '2px solid #dc3545' }}
                         onClick={() => handleDelete(event.id)}
                         disabled={isSubmitting}
