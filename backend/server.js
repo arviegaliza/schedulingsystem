@@ -337,16 +337,6 @@ app.post("/api/reset-password", async (req, res) => {
 
 
 
-// Categories
-app.get('/api/categories', async (req, res) => {
-  try {
-    const results = await pool.query('SELECT * FROM categories');
-    res.json(results.rows); // ✅ Use .rows to get the actual array
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get('/api/department', (req, res) => {
   pool.query('SELECT DISTINCT department FROM categories', (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -362,29 +352,49 @@ app.get('/api/department', (req, res) => {
   });
 });
 
-// POST /api/categories
+// ==========================================
+// CATEGORY ROUTES (Updated for personnel_type & position)
+// ==========================================
+
+// GET Categories
+app.get('/api/categories', async (req, res) => {
+  try {
+    // We select * (which now includes id, idnumber, personnel_type, position, email, department)
+    const results = await pool.query('SELECT * FROM categories ORDER BY id ASC');
+    res.json(results.rows); 
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST Category (Add New)
 app.post('/api/categories', async (req, res) => {
-  const { idnumber, office, email, department } = req.body;
+  // Frontend must now send 'personnel_type' and 'position'
+  const { idnumber, personnel_type, position, email, department } = req.body;
   const userType = (req.query.userType || 'Administrator').trim();
 
-  if (!idnumber || !office || !email || !department) {
-    return res.status(400).json({ error: 'All fields are required, including ID number.' });
+  if (!idnumber || !personnel_type || !position || !email || !department) {
+    return res.status(400).json({ error: 'All fields are required.' });
   }
 
-  // Restrict non-admins from adding to other departments
+  // Permission Check
   if (userType.toLowerCase() !== 'administrator' && userType.toLowerCase() !== department.trim().toLowerCase()) {
     return res.status(403).json({ error: 'You can only add categories for your own department.' });
   }
 
   try {
-    // Check for duplicate idnumber
     const check = await pool.query('SELECT id FROM categories WHERE idnumber = $1', [idnumber]);
     if (check.rows.length > 0) {
       return res.status(409).json({ error: 'ID number already exists.' });
     }
 
-    const sql = 'INSERT INTO categories (idnumber, office, email, department) VALUES ($1, $2, $3, $4) RETURNING *';
-    const { rows } = await pool.query(sql, [idnumber, office, email, department]);
+    // Insert into new columns
+    const sql = `
+      INSERT INTO categories (idnumber, personnel_type, position, email, department) 
+      VALUES ($1, $2, $3, $4, $5) 
+      RETURNING *
+    `;
+    const { rows } = await pool.query(sql, [idnumber, personnel_type, position, email, department]);
 
     res.status(201).json({ message: 'Category added successfully', category: rows[0] });
   } catch (err) {
@@ -393,38 +403,33 @@ app.post('/api/categories', async (req, res) => {
   }
 });
 
-// PUT /api/categories/:id
+// PUT Category (Edit)
 app.put('/api/categories/:id', async (req, res) => {
-  const { office, email, department } = req.body;
+  const { personnel_type, position, email, department } = req.body;
   const userType = (req.query.userType || 'Administrator').trim();
   const id = req.params.id;
 
-  // Validate required fields
-  if (!office || !email || !department) {
+  if (!personnel_type || !position || !email || !department) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
   try {
-    // 1️⃣ Check if the category exists
-    const { rows } = await pool.query(
-      'SELECT department FROM categories WHERE id = $1',
-      [id]
-    );
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Category not found.' });
-    }
+    const { rows } = await pool.query('SELECT department FROM categories WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Category not found.' });
 
     const catDept = (rows[0].department || '').trim();
 
-    // 2️⃣ Restrict based on department (if not admin)
-    if (userType.toLowerCase() !== 'administrator' &&
-        userType.toLowerCase() !== catDept.toLowerCase()) {
+    if (userType.toLowerCase() !== 'administrator' && userType.toLowerCase() !== catDept.toLowerCase()) {
       return res.status(403).json({ error: 'You can only edit categories for your own department.' });
     }
 
-    // 3️⃣ Update the category and return the updated row
-    const sql = 'UPDATE categories SET office = $1, email = $2, department = $3 WHERE id = $4 RETURNING *';
-    const { rows: updated } = await pool.query(sql, [office, email, department, id]);
+    const sql = `
+      UPDATE categories 
+      SET personnel_type = $1, position = $2, email = $3, department = $4 
+      WHERE id = $5 
+      RETURNING *
+    `;
+    const { rows: updated } = await pool.query(sql, [personnel_type, position, email, department, id]);
 
     res.json({ message: 'Category updated successfully', category: updated[0] });
   } catch (err) {
@@ -433,7 +438,7 @@ app.put('/api/categories/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/categories/:id
+// DELETE Category (Unchanged, but good to ensure it works)
 app.delete('/api/categories/:id', async (req, res) => {
   const userType = (req.query.userType || 'Administrator').trim();
   const id = req.params.id;
@@ -450,12 +455,9 @@ app.delete('/api/categories/:id', async (req, res) => {
     await pool.query('DELETE FROM categories WHERE id = $1', [id]);
     res.json({ message: 'Category deleted successfully' });
   } catch (err) {
-    console.error('Error deleting category:', err);
     res.status(500).json({ error: 'Failed to delete category' });
   }
 });
-
-
 // GET all events for frontend
 app.get('/api/events', async (req, res) => {
   try {
