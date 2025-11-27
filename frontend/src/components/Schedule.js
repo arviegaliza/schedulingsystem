@@ -120,6 +120,26 @@ function Schedule() {
   const getDateTime = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}`);
 
   // ----------------------------
+  // Status computation: upcoming / ongoing / ended
+  // ----------------------------
+  const computeEventStatus = (event) => {
+    try {
+      const start = getDateTime(event.start_date, event.start_time);
+      let end = getDateTime(event.end_date, event.end_time);
+      // If end <= start assume crosses midnight
+      if (end <= start) {
+        end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+      }
+      const now = new Date();
+      if (now < start) return 'upcoming';
+      if (now >= start && now < end) return 'ongoing';
+      return 'ended';
+    } catch (e) {
+      return (event.status || 'upcoming');
+    }
+  };
+
+  // ----------------------------
   // Fetching & normalization
   // ----------------------------
   const fetchEvents = useCallback(async () => {
@@ -138,12 +158,22 @@ function Schedule() {
         const start_date_only = toLocalDateOnly(event.start_date);
         const end_date_only = toLocalDateOnly(event.end_date);
 
-        return {
+        // compute and set local status so UI reflects current time immediately
+        const computedStatus = computeEventStatus({
           ...event,
           participants,
           department,
           start_date_only,
           end_date_only
+        });
+
+        return {
+          ...event,
+          participants,
+          department,
+          start_date_only,
+          end_date_only,
+          status: computedStatus
         };
       });
       setEvents(eventsWithParsedData);
@@ -199,12 +229,31 @@ function Schedule() {
   });
 
   // ----------------------------
-  // Create / Update Event
+  // Recompute statuses periodically so UI flips at correct time without refetch
+  // ----------------------------
+  useEffect(() => {
+    const tick = () => {
+      setEvents(prevEvents => prevEvents.map(ev => {
+        const newStatus = computeEventStatus(ev);
+        if (newStatus === ev.status) return ev;
+        return { ...ev, status: newStatus };
+      }));
+    };
+
+    tick(); // ensure immediate correctness
+    const interval = setInterval(tick, 30 * 1000); // every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  // ----------------------------
+  // Create / Update Event (with optional optimistic add)
   // ----------------------------
   const handleAddOrUpdate = async (e) => {
     e.preventDefault();
     toast.dismiss();
     setIsSubmitting(true);
+
+    const OPTIMISTIC = true; // set false to disable optimistic UI add
 
     try {
       // Ensure participants & department arrays
@@ -240,6 +289,22 @@ function Schedule() {
         created_by: user?.email || 'Unknown'
       };
 
+      // Optimistic UI: insert temporary event so user sees it immediately
+      let optimisticId = null;
+      if (!editMode && OPTIMISTIC) {
+        optimisticId = `tmp-${Date.now()}`;
+        const optimisticEvent = {
+          id: optimisticId,
+          ...payload,
+          participants: payloadParticipants,
+          department: payloadDepartments,
+          start_date_only: toLocalDateOnly(payload.start_date),
+          end_date_only: toLocalDateOnly(payload.end_date),
+          status: computeEventStatus(payload)
+        };
+        setEvents(prev => [optimisticEvent, ...prev]);
+      }
+
       if (editMode) {
         await axios.put(`${process.env.REACT_APP_API_URL}/api/events/${editingId}`, payload);
         toast.success('Event updated successfully!');
@@ -248,17 +313,15 @@ function Schedule() {
         toast.success('Event added successfully!');
       }
 
-      await fetchEvents(); // re-fetch to get normalized fields
+      await fetchEvents(); // re-fetch authoritative data
       resetForm();
       setShowForm(false);
       setEditMode(false);
     } catch (err) {
       console.error(err);
-      if (err.response?.status === 409) {
-        toast.error('Conflict: Participant already booked during selected time.');
-      } else {
-        toast.error('Failed to save event.');
-      }
+      toast.error(err.response?.status === 409 ? 'Conflict: Participant already booked during selected time.' : 'Failed to save event.');
+      // rollback optimistic add if present
+      setEvents(prev => prev.filter(ev => !String(ev.id).startsWith('tmp-')));
     } finally {
       setIsSubmitting(false);
     }
