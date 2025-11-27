@@ -1,4 +1,4 @@
-// ...all your imports
+// src/components/Schedule.js
 import React, { useState, useEffect, useCallback } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
@@ -12,23 +12,20 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 
 function Schedule() {
   const { sidebarVisible = true } = useOutletContext() || {};
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+
   const [showTable, setShowTable] = useState(false);
   const [date, setDate] = useState(new Date());
-  const [events, setEvents] = useState([]);
-  const [departments, setDepartments] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [selectedDept, setSelectedDept] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [user, setUser] = useState(null);
-  const navigate = useNavigate();
   const [hoveredDay, setHoveredDay] = useState(null);
   const [hoveredEvents, setHoveredEvents] = useState([]);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
-  // Make sure formData exists before effects that reference it
+  const [events, setEvents] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [selectedDept, setSelectedDept] = useState('');
+
   const [formData, setFormData] = useState({
     program: '',
     start_date: '',
@@ -40,121 +37,82 @@ function Schedule() {
     department: []
   });
 
-  useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem('user'));
-    setUser(storedUser);
+  const [showForm, setShowForm] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // If OfficeUser, pre-select department and participants
-    if (storedUser?.type === 'OfficeUser') {
-      setFormData(() => ({
-        program: '',
-        start_date: '',
-        start_time: '',
-        end_date: '',
-        end_time: '',
-        purpose: '',
-        department: [{ label: storedUser.department, value: storedUser.department }],
-        participants: [{ label: storedUser.office, value: storedUser.office }]
-      }));
-    }
-
-    document.body.style.overflow = storedUser?.type === 'OfficeUser' ? 'auto' : 'hidden';
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem('user');
-    toast.success('Logged out successfully');
-    // If on /office/schedule, always go to /login1
-    if (window.location.pathname === '/office/schedule') {
-      navigate('/login1');
-    } else {
-      navigate('/login');
-    }
-  };
-
+  // ----------------------------
+  // Helper Functions
+  // ----------------------------
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US');
+    const dateObj = new Date(dateStr);
+    return dateObj.toLocaleDateString('en-US');
   };
 
   const formatTime = (timeStr) => {
     if (!timeStr) return '';
     const [hours, minutes] = timeStr.split(':');
-    const date = new Date();
-    date.setHours(parseInt(hours, 10), parseInt(minutes, 10));
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
+    const dateObj = new Date();
+    dateObj.setHours(parseInt(hours, 10), parseInt(minutes, 10));
+    return dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   };
 
-  // ----------------------------
-  // Date helpers (normalize to local date-only)
-  // ----------------------------
   const toLocalDateOnly = (dateLike) => {
     if (!dateLike) return null;
-    // Handle both "YYYY-MM-DD" and ISO full strings with time/offset
     const d = new Date(dateLike);
-    if (!isNaN(d.getTime())) {
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    }
-    // Fallback parse YYYY-MM-DD
-    const base = String(dateLike).split('T')[0];
-    const parts = base.split('-');
-    if (parts.length === 3) {
-      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    }
-    return null;
+    if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const [year, month, day] = String(dateLike).split('T')[0].split('-').map(Number);
+    return new Date(year, month - 1, day);
   };
 
-  const isSameDateOnly = (a, b) => {
-    if (!a || !b) return false;
-    return a.getFullYear() === b.getFullYear() &&
-      a.getMonth() === b.getMonth() &&
-      a.getDate() === b.getDate();
-  };
-
-  // Helper to get exact datetime for overlap checks (keeps original behavior)
   const getDateTime = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}`);
 
- const fetchEvents = useCallback(async () => {
-  try {
-    const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/events`);
-    const eventsWithParsedData = res.data.map(event => {
-      // parsing participants & department
-      const participants = event.participants ? JSON.parse(event.participants) : [];
-      const department = event.department ? JSON.parse(event.department) : [];
-      return { ...event, participants, department };
-    });
-    setEvents(eventsWithParsedData);
+  // ----------------------------
+  // Event status updater
+  // ----------------------------
+  const updateEventStatuses = useCallback(() => {
+    const now = new Date();
+    setEvents(prevEvents =>
+      prevEvents.map(event => {
+        const start = getDateTime(event.start_date, event.start_time);
+        const end = getDateTime(event.end_date, event.end_time);
+        let status = 'upcoming';
+        if (now >= start && now <= end) status = 'ongoing';
+        else if (now > end) status = 'ended';
+        return { ...event, status };
+      })
+    );
+  }, []);
 
-    // Update status after loading events
-    updateEventStatuses();
-  } catch (err) {
-    console.error(err);
-    toast.error('Failed to load events.');
-  }
-}, [updateEventStatuses]);
-
-  
-    // Your existing useEffects (fetchEvents, WebSocket, etc.)
-  useEffect(() => {
-    fetchEvents();
-    updateEventStatuses();
-    const interval = setInterval(updateEventStatuses, 60 * 1000);
-    return () => clearInterval(interval);
-  }, [fetchEvents, updateEventStatuses]);
-
-
-  useEffect(() => {
-    const socket = io(process.env.REACT_APP_API_URL);
-
-    socket.on('connect', () => console.log('🟢 Connected to WebSocket'));
-    socket.on('statusUpdated', () => fetchEvents());
-    return () => socket.disconnect();
-  }, [fetchEvents]);
+  // ----------------------------
+  // Fetching data
+  // ----------------------------
+  const fetchEvents = useCallback(async () => {
+    try {
+      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/events`);
+      const normalized = res.data.map(event => {
+        const participants = typeof event.participants === 'string'
+          ? (event.participants ? JSON.parse(event.participants) : [])
+          : (event.participants || []);
+        const department = typeof event.department === 'string'
+          ? (event.department ? JSON.parse(event.department) : [])
+          : (event.department || []);
+        return {
+          ...event,
+          participants,
+          department,
+          start_date_only: toLocalDateOnly(event.start_date),
+          end_date_only: toLocalDateOnly(event.end_date)
+        };
+      });
+      setEvents(normalized);
+    } catch (err) {
+      console.error('Failed to load events:', err);
+      toast.error('Failed to load events.');
+    }
+  }, []);
 
   const fetchDepartments = useCallback(async () => {
     try {
@@ -176,239 +134,129 @@ function Schedule() {
     }
   }, []);
 
+  // ----------------------------
+  // Effects
+  // ----------------------------
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem('user'));
+    setUser(storedUser);
+  }, []);
+
   useEffect(() => {
     fetchEvents();
     fetchDepartments();
     fetchCategories();
   }, [fetchEvents, fetchDepartments, fetchCategories]);
 
-  const resetForm = () => setFormData({
-    program: '',
-    start_date: '',
-    start_time: '',
-    end_date: '',
-    end_time: '',
-    purpose: '',
-    participants: [],
-    department: []
-  });
+  useEffect(() => {
+    updateEventStatuses();
+    const interval = setInterval(updateEventStatuses, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [updateEventStatuses]);
+
+  useEffect(() => {
+    const socket = io(process.env.REACT_APP_API_URL);
+    socket.on('connect', () => console.log('🟢 Connected to WebSocket'));
+    socket.on('statusUpdated', fetchEvents);
+    return () => socket.disconnect();
+  }, [fetchEvents]);
 
   // ----------------------------
-  // Create / Update Event
+  // Logout
   // ----------------------------
-  const handleAddOrUpdate = async (e) => {
-    e.preventDefault();
-    toast.dismiss();
-    setIsSubmitting(true);
-
-    try {
-      // Ensure participants & department arrays
-      const payloadParticipants = user?.type === 'OfficeUser'
-        ? [user.office]
-        : formData.participants.map(p => p.value);
-
-      const payloadDepartments = user?.type === 'OfficeUser'
-        ? [user.department]
-        : formData.department.map(d => d.value);
-
-      if (!payloadParticipants.length || !payloadDepartments.length) {
-        setIsSubmitting(false);
-        return toast.error('Please select at least one department and one participant.');
-      }
-
-      // Handle end time crossing midnight
-      let start = new Date(`${formData.start_date}T${formData.start_time}`);
-      let end = new Date(`${formData.end_date}T${formData.end_time}`);
-      if (end <= start) {
-        end = new Date(end.getTime() + 24 * 60 * 60 * 1000); // add 1 day
-      }
-
-      const payload = {
-        program: formData.program,
-        start_date: formData.start_date,
-        start_time: formData.start_time,
-        end_date: formData.end_date,
-        end_time: formData.end_time,
-        purpose: formData.purpose,
-        participants: payloadParticipants,
-        department: payloadDepartments,
-        created_by: user?.email || 'Unknown'
-      };
-
-      if (editMode) {
-        await axios.put(`${process.env.REACT_APP_API_URL}/api/events/${editingId}`, payload);
-        toast.success('Event updated successfully!');
-      } else {
-        await axios.post(`${process.env.REACT_APP_API_URL}/api/events`, payload);
-        toast.success('Event added successfully!');
-      }
-
-      await fetchEvents(); // re-fetch to get normalized fields
-      resetForm();
-      setShowForm(false);
-      setEditMode(false);
-    } catch (err) {
-      console.error(err);
-      if (err.response?.status === 409) {
-        toast.error('Conflict: Participant already booked during selected time.');
-      } else {
-        toast.error('Failed to save event.');
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleEdit = (event) => {
-    setFormData({
-      ...event,
-      start_date: event.start_date,
-      start_time: (event.start_time || '').slice(0, 5),
-      end_date: event.end_date,
-      end_time: (event.end_time || '').slice(0, 5),
-      participants: (event.participants || []).map(p => ({ label: p, value: p })),
-      department: (event.department || []).map(d => ({ label: d, value: d }))
-    });
-    setEditMode(true);
-    setEditingId(event.id);
-    setShowForm(true);
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    toast.success('Logged out successfully');
+    navigate(window.location.pathname === '/office/schedule' ? '/login1' : '/login');
   };
 
   // ----------------------------
-  // Permission helpers
+  // Tooltip handlers
   // ----------------------------
-  const canEditEvent = (event) => {
-    if (user?.type === 'Administrator') return true;
-    if (user?.type === 'OfficeUser') {
-      return event.participants && event.participants.includes(user.office);
-    }
-    return event.department && event.department.includes(user?.type);
-  };
-
-  const canDeleteEvent = (event) => {
-    if (user?.type === 'Administrator') return true;
-    if (user?.type === 'OfficeUser') {
-      return event.participants && event.participants.includes(user.office);
-    }
-    return event.department && event.department.includes(user?.type);
-  };
-
-  const handleDelete = async (id) => {
-    toast.dismiss();
-    if (!window.confirm('Are you sure you want to delete this event?')) return;
-
-    try {
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/events/${id}`);
-      toast.success('Event deleted successfully!');
-      fetchEvents(); // refresh events list
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to delete event.');
-    }
-  };
-
-  // ----------------------------
-  // Booking and availability logic (unchanged except using normalized fields where date-only is needed)
-  // ----------------------------
-  const allowedDepartments = user?.type === 'Administrator' ? departments : user ? [user.type] : [];
-  const departmentOptions = allowedDepartments
-    .map(dept => ({ label: dept, value: dept }))
-    .filter(option => {
-      const isSelected = formData.department.some(d => d.value === option.value);
-      const newStart = getDateTime(formData.start_date, formData.start_time);
-      const newEnd = getDateTime(formData.end_date, formData.end_time);
-
-      const isBooked = events.some(event => {
-        if (editMode && event.id === editingId) return false;
-        const eventStart = getDateTime(event.start_date, event.start_time);
-        const eventEnd = getDateTime(event.end_date, event.end_time);
-        const overlaps = newStart < eventEnd && newEnd > eventStart;
-        return overlaps && event.department.includes(option.value);
-      });
-
-      return isSelected || !isBooked;
-    });
-
-  const filteredCategories = categories.filter(cat =>
-    formData.department.some(d => d.value === cat.department.trim())
-  );
-
-  const unavailableParticipants = events
-    .filter(event => {
-      if (editMode && event.id === editingId) return false;
-      const eventStart = getDateTime(event.start_date, event.start_time);
-      const eventEnd = getDateTime(event.end_date, event.end_time);
-      const newStart = getDateTime(formData.start_date, formData.start_time);
-      const newEnd = getDateTime(formData.end_date, formData.end_time);
-      return newStart < eventEnd && newEnd > eventStart;
-    })
-    .flatMap(event => event.participants || []);
-
-  const participantOptions = filteredCategories
-    .map(cat => ({ label: cat.office, value: cat.office }))
-    .filter(opt => {
-      const isSelected = formData.participants.some(p => p.value === opt.value);
-      return isSelected || !unavailableParticipants.includes(opt.value);
-    });
-
-  // ----------------------------
-  // Calendar matching & tooltip (uses date-only normalized fields)
-  // ----------------------------
-  const tileContent = ({ date: tileDate, view }) => {
-    if (view === 'month') {
-      const tileDateOnly = toLocalDateOnly(tileDate);
-      const matches = events.filter(event => {
-        if (event.status === 'ended') return false;
-        const eventStart = event.start_date_only ?? toLocalDateOnly(event.start_date);
-        const eventEnd = event.end_date_only ?? toLocalDateOnly(event.end_date);
-        if (!eventStart || !eventEnd) return false;
-        return (tileDateOnly >= eventStart && tileDateOnly <= eventEnd)
-          && (selectedDept ? event.department?.includes(selectedDept) : true);
-      });
-
-      return (
-        <div
-          className="calendar-tile-content"
-          onMouseEnter={matches.length > 0 ? (e) => handleDayMouseEnter(tileDate, matches, e) : undefined}
-          onMouseMove={matches.length > 0 ? (e) => setTooltipPos({ x: e.clientX, y: e.clientY }) : undefined}
-          onMouseLeave={matches.length > 0 ? handleDayMouseLeave : undefined}
-        >
-          <ul className="calendar-events">
-            {matches.map((event, i) => (
-              <li key={i} className="event-dot" title={event.program}>•</li>
-            ))}
-          </ul>
-        </div>
-      );
-    }
-    return null;
-  };
-
-  const eventsForSelectedDate = events.filter((event) => {
-    if (event.status === 'ended') return false;
-    const eventStart = event.start_date_only ?? toLocalDateOnly(event.start_date);
-    const eventEnd = event.end_date_only ?? toLocalDateOnly(event.end_date);
-    if (!eventStart || !eventEnd) return false;
-
-    const selectedDateOnly = toLocalDateOnly(date);
-    const matchesDate = (eventStart <= selectedDateOnly && eventEnd >= selectedDateOnly);
-    const matchesDept = selectedDept ? event.department?.includes(selectedDept) : true;
-    return matchesDate && matchesDept;
-  });
-
-  // tooltip handlers etc.
   const handleDayMouseEnter = (tileDate, events, e) => {
     setHoveredDay(tileDate.toDateString());
     setHoveredEvents(events);
     setTooltipPos({ x: e.clientX, y: e.clientY });
   };
-  const handleDayMouseLeave = () => {
-    setHoveredDay(null);
-    setHoveredEvents([]);
+  const handleDayMouseLeave = () => { setHoveredDay(null); setHoveredEvents([]); };
+
+  // ----------------------------
+  // Form Handlers
+  // ----------------------------
+  const handleFormChange = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
+
+  // ----------------------------
+  // Double-booking check
+  // ----------------------------
+  const isOverlapping = (participant, startDT, endDT, ignoreId = null) => {
+    return events.some(event => {
+      if (ignoreId && event.id === ignoreId) return false;
+      if (!event.participants.includes(participant)) return false;
+      const evStart = getDateTime(event.start_date, event.start_time);
+      const evEnd = getDateTime(event.end_date, event.end_time);
+      return startDT < evEnd && endDT > evStart;
+    });
+  };
+
+  const handleSubmitForm = async () => {
+    const startDT = getDateTime(formData.start_date, formData.start_time);
+    const endDT = getDateTime(formData.end_date, formData.end_time);
+    for (let p of formData.participants.map(p => p.value)) {
+      if (isOverlapping(p, startDT, endDT, editMode ? editingId : null)) {
+        toast.error(`Participant "${p}" is already booked in another event during this time.`);
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        ...formData,
+        participants: JSON.stringify(formData.participants.map(p => p.value)),
+        department: JSON.stringify(formData.department.map(d => d.value))
+      };
+      if (editMode) {
+        await axios.put(`${process.env.REACT_APP_API_URL}/api/events/${editingId}`, payload);
+        toast.success('Event updated');
+      } else {
+        await axios.post(`${process.env.REACT_APP_API_URL}/api/events`, payload);
+        toast.success('Event created');
+      }
+      fetchEvents();
+      setShowForm(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to submit form');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEditEvent = (event) => {
+    setEditingId(event.id);
+    setFormData({
+      ...event,
+      participants: event.participants.map(p => ({ label: p, value: p })),
+      department: event.department.map(d => ({ label: d, value: d }))
+    });
+    setEditMode(true);
+    setShowForm(true);
+  };
+
+  const handleDeleteEvent = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this event?')) return;
+    try {
+      await axios.delete(`${process.env.REACT_APP_API_URL}/api/events/${id}`);
+      toast.success('Event deleted');
+      fetchEvents();
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to delete event');
+    }
   };
 
   // ----------------------------
-  // JSX render
+  // JSX Render
   // ----------------------------
   return (
     <div className="schedule-container">
@@ -417,7 +265,7 @@ function Schedule() {
           Officer: {user?.office}
         </div>
       )}
-      {/* Professional Schedule Header */}
+
       <div className="schedule-header logout-relative">
         {user?.type === 'OfficeUser' && (
           <button className="logout-btn logout-top-right" onClick={handleLogout}>
@@ -425,6 +273,7 @@ function Schedule() {
           </button>
         )}
         <h2 className="schedule-title">Schedule</h2>
+
         <div className="header-mobile-stack">
           <div className="filter-stack">
             <label className="dropdown-label">Filter by Department:</label>
@@ -435,38 +284,59 @@ function Schedule() {
           </div>
           <hr className="filter-hr" />
         </div>
+
         <button className="add-entry-btn full-width-mobile" style={{ marginTop: 8 }} onClick={() => {
-          if (user?.type === 'OfficeUser') {
-            setFormData({
-              program: '',
-              start_date: '',
-              start_time: '',
-              end_date: '',
-              end_time: '',
-              purpose: '',
-              department: [{ label: user.department, value: user.department }],
-              participants: [{ label: user.office, value: user.office }]
-            });
-          } else {
-            resetForm();
-          }
+          setFormData({
+            program: '',
+            start_date: '',
+            start_time: '',
+            end_date: '',
+            end_time: '',
+            purpose: '',
+            participants: [],
+            department: []
+          });
           setEditMode(false);
           setShowForm(true);
         }}>
           New Entry
         </button>
       </div>
-      {/* End Professional Schedule Header */}
+
       {/* Calendar */}
       <Calendar
         onChange={(selectedDate) => { setDate(selectedDate); setShowTable(true); }}
         value={date}
-        tileContent={tileContent}
+        tileContent={({ date: tileDate, view }) => {
+          if (view !== 'month') return null;
+          const tileDateOnly = toLocalDateOnly(tileDate);
+          const matches = events.filter(event => event.status !== 'ended' &&
+            tileDateOnly >= event.start_date_only && tileDateOnly <= event.end_date_only &&
+            (selectedDept ? event.department?.includes(selectedDept) : true)
+          );
+          return (
+            <div
+              className="calendar-tile-content"
+              onMouseEnter={matches.length > 0 ? (e) => handleDayMouseEnter(tileDate, matches, e) : undefined}
+              onMouseMove={matches.length > 0 ? (e) => setTooltipPos({ x: e.clientX, y: e.clientY }) : undefined}
+              onMouseLeave={matches.length > 0 ? handleDayMouseLeave : undefined}
+            >
+              <ul className="calendar-events">
+                {matches.map((event, i) => (
+                  <li key={i} className="event-dot" title={event.program}>•</li>
+                ))}
+              </ul>
+            </div>
+          );
+        }}
       />
-      <p className="selected-date" style={{ marginTop: 0, marginBottom: 16, textAlign: 'center' }}>Selected Date: <strong>{date.toDateString()}</strong></p>
+
+      <p className="selected-date" style={{ marginTop: 0, marginBottom: 16, textAlign: 'center' }}>
+        Selected Date: <strong>{date.toDateString()}</strong>
+      </p>
 
       {/* Event Table */}
-      {showTable && eventsForSelectedDate.length > 0 && (
+      {showTable && (
         <div className="event-table-wrapper" onClick={() => setShowTable(false)}>
           <div className={`event-table-modal${sidebarVisible === false ? ' sidebar-hidden' : ''}`} onClick={(e) => e.stopPropagation()}>
             <button className="close-table-btn" onClick={() => setShowTable(false)}>×</button>
@@ -485,7 +355,7 @@ function Schedule() {
                 </tr>
               </thead>
               <tbody>
-                {eventsForSelectedDate.map((event) => (
+                {events.filter(event => event.start_date_only <= date && event.end_date_only >= date).map(event => (
                   <tr key={event.id}>
                     <td>{event.program}</td>
                     <td>
@@ -500,27 +370,17 @@ function Schedule() {
                     <td>{event.participants?.join(', ')}</td>
                     <td>{event.department?.join(', ')}</td>
                     <td>
-                      <span className="status-badge">
+                      <span className={`status-badge status-${event.status}`}>
                         {String(event.status || '').charAt(0).toUpperCase() + String(event.status || '').slice(1)}
                       </span>
                     </td>
                     <td>
-                      {canEditEvent(event) && <button
-                        className="edit-btn"
-                        style={{ fontWeight: 'bold', color: 'black', background: 'white', border: '2px solid #007bff' }}
-                        onClick={() => handleEdit(event)}
-                        disabled={isSubmitting}
-                      >
-                        Edit
-                      </button>}
-                      {canDeleteEvent(event) && <button
-                        className="delete-btn"
-                        style={{ fontWeight: 'bold', color: 'black', background: 'white', border: '2px solid #dc3545' }}
-                        onClick={() => handleDelete(event.id)}
-                        disabled={isSubmitting}
-                      >
-                        Delete
-                      </button>}
+                      {user?.type === 'Administrator' && (
+                        <>
+                          <button onClick={() => handleEditEvent(event)}>Edit</button>
+                          <button onClick={() => handleDeleteEvent(event.id)}>Delete</button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -530,97 +390,7 @@ function Schedule() {
         </div>
       )}
 
-      {/* Form Modal */}
-      {showForm && (
-        <div className="event-form-overlay" onClick={() => setShowForm(false)}>
-          <form className="event-form" onClick={(e) => e.stopPropagation()} onSubmit={handleAddOrUpdate}>
-            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>{editMode ? 'Edit Event' : 'Add New Event'}</h3>
-              <button
-                type="button"
-                className="modal-close-btn"
-                aria-label="Close"
-                onClick={() => setShowForm(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '2rem',
-                  color: '#888',
-                  cursor: 'pointer',
-                  marginLeft: '16px',
-                  lineHeight: 1,
-                  transition: 'color 0.2s',
-                }}
-              >
-                ×
-              </button>
-            </div>
-            <div className="form-top-right">
-              {/* Department and Participants fields for non-OfficeUser */}
-              {user?.type !== 'OfficeUser' && (
-                <div className="form-col">
-                  <label>Department</label>
-                  <Select isMulti options={departmentOptions} value={formData.department}
-                    onChange={(selected) => setFormData({ ...formData, department: selected, participants: [] })} />
-                </div>
-              )}
-              {user?.type !== 'OfficeUser' && formData.department.length > 0 && (
-                <div className="form-col">
-                  <label>Participants</label>
-                  <Select isMulti options={participantOptions} value={formData.participants}
-                    onChange={(selected) => setFormData({ ...formData, participants: selected })} />
-                </div>
-              )}
-              {/* For OfficeUser, show department and office as disabled fields */}
-              {user?.type === 'OfficeUser' && (
-                <>
-                  <div className="form-col">
-                    <label>Department</label>
-                    <input type="text" value={user.department} disabled />
-                  </div>
-                  <div className="form-col">
-                    <label>Office</label>
-                    <input type="text" value={user.office} disabled />
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="form-col">
-              <label>Program Name</label>
-              <input name="program" value={formData.program} onChange={(e) => setFormData({ ...formData, program: e.target.value })} required />
-            </div>
-            <div className="form-row">
-              <div className="form-col">
-                <label>Start Date</label>
-                <input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} required />
-              </div>
-              <div className="form-col">
-                <label>Start Time</label>
-                <input type="time" value={formData.start_time} onChange={(e) => setFormData({ ...formData, start_time: e.target.value })} required />
-              </div>
-            </div>
-            <div className="form-row">
-              <div className="form-col">
-                <label>End Date</label>
-                <input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} required />
-              </div>
-              <div className="form-col">
-                <label>End Time</label>
-                <input type="time" value={formData.end_time} onChange={(e) => setFormData({ ...formData, end_time: e.target.value })} required />
-              </div>
-            </div>
-            <div className="form-col">
-              <label>Purpose</label>
-              <textarea value={formData.purpose} onChange={(e) => setFormData({ ...formData, purpose: e.target.value })} required />
-            </div>
-            <button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving...' : editMode ? 'Update' : 'Save'} Entry
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Tooltip for day details */}
+      {/* Tooltip */}
       {hoveredDay && hoveredEvents.length > 0 && (
         <div
           className="calendar-tooltip"
@@ -636,7 +406,7 @@ function Schedule() {
             padding: '12px',
             minWidth: '260px',
             pointerEvents: 'none',
-            fontSize: '14px',
+            fontSize: '14px'
           }}
         >
           <strong>Events on {hoveredDay}:</strong>
@@ -652,6 +422,56 @@ function Schedule() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Add/Edit Event Form Modal */}
+      {showForm && (
+        <div className="form-modal-wrapper" onClick={() => setShowForm(false)}>
+          <div className="form-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{editMode ? 'Edit Event' : 'New Event'}</h3>
+
+            <label>Program:</label>
+            <input value={formData.program} onChange={(e) => handleFormChange('program', e.target.value)} />
+
+            <label>Purpose:</label>
+            <input value={formData.purpose} onChange={(e) => handleFormChange('purpose', e.target.value)} />
+
+            <label>Start Date:</label>
+            <input type="date" value={formData.start_date} onChange={(e) => handleFormChange('start_date', e.target.value)} />
+
+            <label>Start Time:</label>
+            <input type="time" value={formData.start_time} onChange={(e) => handleFormChange('start_time', e.target.value)} />
+
+            <label>End Date:</label>
+            <input type="date" value={formData.end_date} onChange={(e) => handleFormChange('end_date', e.target.value)} />
+
+            <label>End Time:</label>
+            <input type="time" value={formData.end_time} onChange={(e) => handleFormChange('end_time', e.target.value)} />
+
+            <label>Department:</label>
+            <Select
+              options={departments.map(d => ({ label: d, value: d }))}
+              value={formData.department}
+              onChange={(selected) => handleFormChange('department', selected)}
+              isMulti
+            />
+
+            <label>Participants:</label>
+            <Select
+              options={categories.map(c => ({ label: c.name, value: c.name }))}
+              value={formData.participants}
+              onChange={(selected) => handleFormChange('participants', selected)}
+              isMulti
+            />
+
+            <div className="form-buttons">
+              <button onClick={handleSubmitForm} disabled={isSubmitting}>
+                {editMode ? 'Update' : 'Create'}
+              </button>
+              <button onClick={() => setShowForm(false)}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
 
