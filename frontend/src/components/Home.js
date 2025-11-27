@@ -1,8 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './style.css';
 import axios from 'axios';
 import useSocket from '../hooks/useSocket';
+import './style.css'; // Ensure your CSS file is linked
+
+// --- SVGs for Icons (Embedded to avoid external dependencies) ---
+const IconCalendar = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+);
+const IconUsers = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+);
+const IconBuilding = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="9" y1="22" x2="9" y2="22.01"></line><line x1="15" y1="22" x2="15" y2="22.01"></line><line x1="12" y1="22" x2="12" y2="22.01"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>
+);
 
 const QUOTES = [
   "Success is not the key to happiness. Happiness is the key to success.",
@@ -12,7 +23,7 @@ const QUOTES = [
   "Dream bigger. Do bigger.",
   "Don't stop when you're tired. Stop when you're done.",
   "Stay positive, work hard, make it happen.",
-  "Productivity is never an accident. It is always the result of a commitment to excellence, intelligent planning, and focused effort.",
+  "Productivity is never an accident. It is always the result of a commitment to excellence.",
   "The secret of getting ahead is getting started.",
   "Small steps every day."
 ];
@@ -21,17 +32,15 @@ function getRandomQuote() {
   return QUOTES[Math.floor(Math.random() * QUOTES.length)];
 }
 
-// Optional lightweight mock so UI doesn't look empty when offline.
-// Remove or extend this if you have a proper cached store.
 const MOCK_EVENTS = [
   {
     id: 'mock-1',
-    program: 'Demo: Mock Event',
+    program: 'Demo: Team Meeting',
     start_date: new Date().toISOString(),
     end_date: new Date(Date.now() + 3600000).toISOString(),
     start_time: '09:00:00',
     end_time: '10:00:00',
-    department: ['SGOD'],
+    department: ['Admin'],
     status: 'upcoming'
   }
 ];
@@ -47,7 +56,6 @@ function Home() {
   const [quote, setQuote] = useState(getRandomQuote());
   const [fetchError, setFetchError] = useState(null);
 
-  // Point to your backend; update if needed
   const BASE_URL = 'https://schedulingsystem-1.onrender.com';
 
   useEffect(() => {
@@ -56,11 +64,10 @@ function Home() {
 
     const axiosInstance = axios.create({
       baseURL: BASE_URL,
-      timeout: 10000, // 10s
+      timeout: 10000,
       signal: controller.signal,
     });
 
-    // Simple retry/backoff helper
     const fetchWithRetry = async (fn, retries = 2, delay = 700) => {
       try {
         return await fn();
@@ -88,31 +95,14 @@ function Home() {
 
         setEvents(Array.isArray(eventsRes.data) ? eventsRes.data : []);
         setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
-        // department endpoint might return objects like { department: 'X' } or strings
         const deptArray = Array.isArray(deptsRes.data) ? deptsRes.data.map(d => d.department ?? d.name ?? d) : [];
         setDepartments(deptArray);
 
-        // if everything fetched fine but arrays are empty, leave as-is
       } catch (err) {
-        // verbose console info for debugging
-        console.error('Failed to fetch data - message:', err?.message);
-        console.error('Error code:', err?.code);                   // e.g. ECONNRESET, ECONNABORTED
-        console.error('Is Axios error:', !!err?.isAxiosError);
-        if (err?.request && !err?.response) {
-          console.error('Request made but no response received:', err.request);
-        } else if (err?.response) {
-          console.error('Response status:', err.response.status, 'data:', err.response.data);
-        }
-
+        console.error('Data fetch failed:', err);
         if (!mounted) return;
-
-        setFetchError('Unable to contact scheduling backend. Check server or network.');
-
-        // Optional fallback so UI stays useful during outages:
-        if (events.length === 0) {
-          setEvents(MOCK_EVENTS);
-        }
-        // Keep users/departments as empty or provide mock data if you prefer.
+        setFetchError('System is currently offline or unreachable.');
+        if (events.length === 0) setEvents(MOCK_EVENTS);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -124,145 +114,174 @@ function Home() {
       mounted = false;
       controller.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run on mount only
+  }, []);
 
   useSocket(() => {
-    // You can trigger a data refresh here if desired
-    // e.g. re-fetch events or call an endpoint to get delta
-    console.log('Received real-time status update!');
+    console.log('Real-time update received');
   });
 
+  // --- Formatting Helpers ---
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US');
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  const formatTime = (dateStr, timeStr) => {
-    if (!dateStr || !timeStr) return '';
-    const time = timeStr.length > 8 ? timeStr.slice(11, 19) : timeStr;
-    const date = new Date(`${dateStr.split('T')[0]}T${time}`);
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    });
+  const formatTime = (timeStr) => {
+    if (!timeStr) return '';
+    const [hours, minutes] = timeStr.split(':');
+    const date = new Date();
+    date.setHours(hours, minutes);
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
-  // Use end_date and status for upcoming filter
+  // --- Data Processing ---
   const now = new Date();
   const upcomingEvents = events
     .filter(ev => {
       try {
-        const end = new Date(ev.end_date);
-        return end > now && String(ev.status).toLowerCase() === 'upcoming';
-      } catch (e) {
-        return false;
-      }
+        return new Date(ev.end_date) > now && String(ev.status).toLowerCase() === 'upcoming';
+      } catch { return false; }
     })
     .sort((a, b) => new Date(a.start_date) - new Date(b.start_date));
 
-  // debug
-  // console.log('upcomingEvents:', upcomingEvents);
+  // --- Effects for Slider ---
+  useEffect(() => setCurrentEventIdx(0), [upcomingEvents.length]);
 
-  // Reset currentEventIdx when events change
-  useEffect(() => {
-    setCurrentEventIdx(0);
-  }, [upcomingEvents.length]);
-
-  // Auto slider
   useEffect(() => {
     if (upcomingEvents.length <= 1) return;
     const interval = setInterval(() => {
-      setCurrentEventIdx(idx => (idx + 1) % upcomingEvents.length);
-    }, 4000);
+      setFadeIn(false);
+      setTimeout(() => {
+        setCurrentEventIdx(idx => (idx + 1) % upcomingEvents.length);
+        setFadeIn(true);
+      }, 300); // Wait for fade out
+    }, 5000);
     return () => clearInterval(interval);
   }, [upcomingEvents.length]);
 
-  // Fade animation when event changes
-  useEffect(() => {
-    setFadeIn(false);
-    const timeout = setTimeout(() => setFadeIn(true), 50);
-    return () => clearTimeout(timeout);
-  }, [currentEventIdx]);
-
-  // Refresh quote on mount
-  useEffect(() => {
-    setQuote(getRandomQuote());
-  }, []);
-
   if (loading) {
     return (
-      <div className="loading-screen">
+      <div className="loading-container">
         <div className="spinner"></div>
-        <p>Loading...</p>
+        <p>Loading Dashboard...</p>
       </div>
     );
   }
 
+  const activeEvent = upcomingEvents[currentEventIdx];
+
   return (
-    <div className="home-welcome-container dashboard-home" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-      <div className="home-welcome-card" style={{ marginBottom: 40, width: '100%', maxWidth: 600 }}>
-        <h1>Welcome to SDOIN SCHEDULING </h1>
-        <p className="home-desc">
-          Effortlessly manage, schedule, and track all your department's events and activities.<br/>
-          Use the sidebar to navigate between Schedules, Reports, Categories, and more.
-        </p>
-
-        <div style={{ margin: '18px 0', fontStyle: 'italic', color: '#007bff', fontSize: '1.1rem' }}>
-          {quote}
+    <div className="dashboard-container fade-in">
+      
+      {/* Header Section */}
+      <header className="dashboard-header">
+        <div className="header-content">
+          <h1>SDOIN Scheduling</h1>
+          <p className="subtitle">Manage events, track schedules, and generate reports.</p>
         </div>
-
-        <div className="home-quick-actions">
-          <button onClick={() => navigate('/dashboard/schedule')}>View Schedule</button>
-          <button onClick={() => navigate('/dashboard/reports')}>Download Reports</button>
-          <button onClick={() => navigate('/dashboard/categories')}>Manage Categories</button>
+        <div className="quote-card">
+          <blockquote>"{quote}"</blockquote>
         </div>
-      </div>
+      </header>
 
-      {/* friendly error banner */}
+      {/* Error Banner */}
       {fetchError && (
-        <div className="alert error" style={{ maxWidth: 1200, marginBottom: 18 }}>
-          {fetchError} — Try refreshing the page or check the server. (See console for details.)
+        <div className="error-banner">
+          <span>⚠️ {fetchError}</span>
         </div>
       )}
 
-      <div className="home-stats-events" style={{ width: '100%', maxWidth: 1200 }}>
-        <div className="home-stats">
-          <div className="stat-card">
-            <div className="stat-value">{events.length}</div>
-            <div className="stat-label">Total Events</div>
+      {/* Main Grid Layout */}
+      <div className="dashboard-grid">
+        
+        {/* Left Column: Stats & Actions */}
+        <div className="grid-left">
+          
+          {/* Quick Stats Row */}
+          <div className="stats-row">
+            <div className="stat-card">
+              <div className="stat-icon blue"><IconCalendar /></div>
+              <div className="stat-info">
+                <h3>{events.length}</h3>
+                <span>Events</span>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon green"><IconUsers /></div>
+              <div className="stat-info">
+                <h3>{users.length}</h3>
+                <span>Users</span>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon purple"><IconBuilding /></div>
+              <div className="stat-info">
+                <h3>{departments.length}</h3>
+                <span>Depts</span>
+              </div>
+            </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-value">{users.length}</div>
-            <div className="stat-label">Total Users</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value">{departments.length}</div>
-            <div className="stat-label">Departments</div>
+
+          {/* Quick Actions */}
+          <div className="actions-section">
+            <h3>Quick Actions</h3>
+            <div className="action-buttons">
+              <button className="btn-primary" onClick={() => navigate('/dashboard/schedule')}>
+                View Schedule
+              </button>
+              <button className="btn-secondary" onClick={() => navigate('/dashboard/reports')}>
+                Reports
+              </button>
+              <button className="btn-outline" onClick={() => navigate('/dashboard/categories')}>
+                Categories
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="home-upcoming">
-          <h3>Upcoming Events</h3>
-          {upcomingEvents.length === 0 ? (
-            <div className="no-events">No upcoming events.</div>
-          ) : (
-            <ul className="upcoming-list">
-              <li className={`upcoming-item upcoming-slide-horizontal${fadeIn ? ' show' : ''}`}>
-                <div className="upcoming-title">{upcomingEvents[currentEventIdx]?.program}</div>
-                <div className="upcoming-date">
-                  {formatDate(upcomingEvents[currentEventIdx]?.start_date)} {formatTime(upcomingEvents[currentEventIdx]?.start_date, upcomingEvents[currentEventIdx]?.start_time)}
-                  {' - '}
-                  {formatDate(upcomingEvents[currentEventIdx]?.end_date)} {formatTime(upcomingEvents[currentEventIdx]?.end_date, upcomingEvents[currentEventIdx]?.end_time)}
+        {/* Right Column: Upcoming Events Hero */}
+        <div className="grid-right">
+          <div className="upcoming-card">
+            <div className="card-header">
+              <h3>📅 Upcoming Events</h3>
+              <span className="badge">{upcomingEvents.length} Active</span>
+            </div>
+            
+            <div className="card-body">
+              {upcomingEvents.length === 0 ? (
+                <div className="empty-state">No upcoming events scheduled.</div>
+              ) : (
+                <div className={`event-display ${fadeIn ? 'visible' : 'hidden'}`}>
+                  <div className="event-date-box">
+                    <span className="month">{new Date(activeEvent?.start_date).toLocaleString('default', { month: 'short' })}</span>
+                    <span className="day">{new Date(activeEvent?.start_date).getDate()}</span>
+                  </div>
+                  <div className="event-details">
+                    <h4>{activeEvent?.program}</h4>
+                    <p className="time-row">
+                      {formatTime(activeEvent?.start_time)} - {formatTime(activeEvent?.end_time)}
+                    </p>
+                    <p className="dept-row">
+                      Department: <strong>{Array.isArray(activeEvent?.department) ? activeEvent.department.join(', ') : activeEvent?.department}</strong>
+                    </p>
+                  </div>
                 </div>
-                <div className="upcoming-dept">
-                  Dept: {Array.isArray(upcomingEvents[currentEventIdx]?.department) ? upcomingEvents[currentEventIdx]?.department.join(', ') : upcomingEvents[currentEventIdx]?.department}
+              )}
+              
+              {/* Slider Dots */}
+              {upcomingEvents.length > 1 && (
+                <div className="slider-dots">
+                  {upcomingEvents.map((_, idx) => (
+                    <span 
+                      key={idx} 
+                      className={`dot ${idx === currentEventIdx ? 'active' : ''}`}
+                      onClick={() => setCurrentEventIdx(idx)} // Allow manual click
+                    ></span>
+                  ))}
                 </div>
-              </li>
-            </ul>
-          )}
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
