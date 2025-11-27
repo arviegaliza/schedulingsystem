@@ -331,6 +331,19 @@ function Schedule() {
   const participantOptions = filteredCategories
     .map(cat => ({ label: cat.office, value: cat.office }));
 
+
+  // --- HANDLERS FOR TOOLTIP (MOVED UP) ---
+  const handleDayMouseEnter = (tileDate, events, e) => {
+    setHoveredDay(tileDate.toDateString());
+    setHoveredEvents(events);
+    setTooltipPos({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleDayMouseLeave = () => {
+    setHoveredDay(null);
+    setHoveredEvents([]);
+  };
+
   // --- UPDATED LOGIC: Tile Content ---
   const tileContent = ({ date: tileDate, view }) => {
     if (view === 'month') {
@@ -352,13 +365,10 @@ function Schedule() {
       return (
         <div
           className="calendar-tile-content"
-          onMouseEnter={(e) => {
-            setHoveredDay(tileDate.toDateString());
-            setHoveredEvents(matches);
-            setTooltipPos({ x: e.clientX, y: e.clientY });
-          }}
+          // --- CONNECTED HANDLERS HERE ---
+          onMouseEnter={(e) => handleDayMouseEnter(tileDate, matches, e)}
           onMouseMove={(e) => setTooltipPos({ x: e.clientX, y: e.clientY })}
-          onMouseLeave={() => { setHoveredDay(null); setHoveredEvents([]); }}
+          onMouseLeave={handleDayMouseLeave}
         >
           <ul className="calendar-events">
             {matches.map((event, i) => (
@@ -382,16 +392,6 @@ function Schedule() {
     const matchesDept = selectedDept ? (Array.isArray(event.department) && event.department.includes(selectedDept)) : true;
     return matchesDate && matchesDept;
   });
-
-  const handleDayMouseEnter = (tileDate, events, e) => {
-    setHoveredDay(tileDate.toDateString());
-    setHoveredEvents(events);
-    setTooltipPos({ x: e.clientX, y: e.clientY });
-  };
-  const handleDayMouseLeave = () => {
-    setHoveredDay(null);
-    setHoveredEvents([]);
-  };
 
   return (
     <div className="schedule-container">

@@ -192,40 +192,60 @@ cron.schedule('0 0 * * *', async () => {
     console.error('❌ Failed to delete expired events:', err.message || err);
   }
 });
-
 // 3️⃣ Notification job (every 5 minutes)
 cron.schedule('*/5 * * * *', async () => {
   try {
+    // 1. Fetch un-notified events happening in the next 1 hour
+    // We use LOCALTIMESTAMP to match your local date strings
     const sql = `
       SELECT id, program AS title, participants, start_date, start_time, notified
       FROM schedule_events
       WHERE (notified = false OR notified IS NULL)
-        AND (start_date + start_time::interval) BETWEEN NOW() AND (NOW() + INTERVAL '1 hour')
+        AND (start_date::text || ' ' || start_time::text)::timestamp 
+        BETWEEN LOCALTIMESTAMP AND (LOCALTIMESTAMP + INTERVAL '1 hour')
     `;
     const { rows: events } = await pool.query(sql);
 
+    // Helper to safely parse JSON if it's a string, or return as is
+    const safeJSONParse = (data, fallback = []) => {
+      if (Array.isArray(data)) return data;
+      try { return JSON.parse(data); } catch { return fallback; }
+    };
+
+    // Helper to format date for the email
+    const formatDateTime = (d, t) => {
+        return new Date(`${d}T${t}`).toLocaleString('en-US', { 
+            month: 'long', day: 'numeric', year: 'numeric', 
+            hour: 'numeric', minute: '2-digit', hour12: true 
+        });
+    };
+
     for (const event of events) {
       const participants = safeJSONParse(event.participants, []);
+      
+      // If no participants, just mark as notified and skip
       if (!participants.length) {
         await pool.query('UPDATE schedule_events SET notified = true WHERE id = $1', [event.id]);
         continue;
       }
 
-      // Fetch emails of all participants
+      // 2. Fetch emails of participants
+      // FIXED: Changed 'office' to 'position' to match your DB update
       const userSql = `
         SELECT email FROM categories
-        WHERE office = ANY($1::text[])
+        WHERE position = ANY($1::text[])
       `;
       const { rows: users } = await pool.query(userSql, [participants]);
 
       if (users.length) {
         await Promise.all(
           users.map(user => {
-            const reminderMsg = `Reminder: You have an event "${event.title}" starting at ${formatManilaDateTime(event.start_date, event.start_time)}.`;
+            const reminderMsg = `Hello,\n\nThis is a reminder for your upcoming event:\n\nTitle: ${event.title}\nTime: ${formatDateTime(event.start_date, event.start_time)}\n\nPlease be there on time.\n\n- Automated Schedule System`;
+            
             return transporter.sendMail({
               from: process.env.EMAIL_USER,
               to: user.email,
-              subject: 'Event Reminder',
+              subject: `Reminder: ${event.title}`,
               text: reminderMsg
             }).then(() => {
               console.log(`✅ Sent reminder to ${user.email} for event ${event.id}`);
@@ -236,7 +256,7 @@ cron.schedule('*/5 * * * *', async () => {
         );
       }
 
-      // Mark event as notified
+      // 3. Mark event as notified so we don't send it again
       await pool.query('UPDATE schedule_events SET notified = true WHERE id = $1', [event.id]);
     }
 
@@ -245,6 +265,7 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
+ 
 // 4️⃣ Reset all  every week (Sunday midnight)
 cron.schedule('0 0 * * 0', async () => {
   try {
@@ -353,13 +374,13 @@ app.get('/api/department', (req, res) => {
 });
 
 // ==========================================
-// CATEGORY ROUTES (Updated for personnel_type & position)
+// CATEGORY ROUTES (Fixed: Uses 'position' instead of 'office')
 // ==========================================
 
 // GET Categories
 app.get('/api/categories', async (req, res) => {
   try {
-    // We select * (which now includes id, idnumber, personnel_type, position, email, department)
+    // Selects all columns (id, idnumber, position, personnel_type, email, department)
     const results = await pool.query('SELECT * FROM categories ORDER BY id ASC');
     res.json(results.rows); 
   } catch (err) {
@@ -369,15 +390,16 @@ app.get('/api/categories', async (req, res) => {
 
 // POST Category (Add New)
 app.post('/api/categories', async (req, res) => {
-  // Frontend must now send 'personnel_type' and 'position'
+  // 1. Receive 'position' and 'personnel_type' from frontend
   const { idnumber, personnel_type, position, email, department } = req.body;
   const userType = (req.query.userType || 'Administrator').trim();
 
+  // 2. Validate inputs
   if (!idnumber || !personnel_type || !position || !email || !department) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
-  // Permission Check
+  // 3. Check Permissions
   if (userType.toLowerCase() !== 'administrator' && userType.toLowerCase() !== department.trim().toLowerCase()) {
     return res.status(403).json({ error: 'You can only add categories for your own department.' });
   }
@@ -388,7 +410,7 @@ app.post('/api/categories', async (req, res) => {
       return res.status(409).json({ error: 'ID number already exists.' });
     }
 
-    // Insert into new columns
+    // 4. INSERT using 'position' and 'personnel_type' (NOT office)
     const sql = `
       INSERT INTO categories (idnumber, personnel_type, position, email, department) 
       VALUES ($1, $2, $3, $4, $5) 
@@ -399,7 +421,7 @@ app.post('/api/categories', async (req, res) => {
     res.status(201).json({ message: 'Category added successfully', category: rows[0] });
   } catch (err) {
     console.error('Insert Error:', err);
-    res.status(500).json({ error: 'Insert failed' });
+    res.status(500).json({ error: 'Insert failed: ' + err.message });
   }
 });
 
@@ -423,6 +445,7 @@ app.put('/api/categories/:id', async (req, res) => {
       return res.status(403).json({ error: 'You can only edit categories for your own department.' });
     }
 
+    // 5. UPDATE using 'position' and 'personnel_type'
     const sql = `
       UPDATE categories 
       SET personnel_type = $1, position = $2, email = $3, department = $4 
@@ -438,7 +461,7 @@ app.put('/api/categories/:id', async (req, res) => {
   }
 });
 
-// DELETE Category (Unchanged, but good to ensure it works)
+// DELETE Category (Unchanged)
 app.delete('/api/categories/:id', async (req, res) => {
   const userType = (req.query.userType || 'Administrator').trim();
   const id = req.params.id;
