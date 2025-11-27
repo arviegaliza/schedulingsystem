@@ -4,8 +4,7 @@ import axios from 'axios';
 import useSocket from '../hooks/useSocket';
 import './style.css';
 
-// --- Assets & Constants ---
-const DEFAULT_LOGO = "https://via.placeholder.com/100?text=Logo"; // Replace with your actual logo path
+// --- QUOTES ARRAY ---
 const QUOTES = [
   "Success is not the key to happiness. Happiness is the key to success.",
   "The best way to get started is to quit talking and begin doing.",
@@ -56,7 +55,6 @@ function Home() {
 
   const formatTime = (timeStr) => {
     if (!timeStr) return '';
-    // Handle "HH:MM:SS" or "HH:MM"
     const [hours, minutes] = timeStr.split(':');
     const date = new Date();
     date.setHours(hours, minutes);
@@ -108,11 +106,9 @@ function Home() {
 
   useSocket(() => {
     console.log('Live update received');
-    // Optional: Trigger re-fetch here if your socket returns a "dirty" signal
   });
 
   // --- Memoized Logic ---
-  // Filters and sorts events. Only runs when `data.events` changes.
   const upcomingEvents = useMemo(() => {
     const now = new Date();
     return data.events
@@ -132,19 +128,17 @@ function Home() {
       setTimeout(() => {
         setCurrentEventIdx(prev => (prev + 1) % upcomingEvents.length);
         setFadeIn(true);
-      }, 500); // Wait for fade out transition (CSS matches .5s)
-    }, 5000); // 5 seconds per slide
+      }, 500); 
+    }, 5000); 
 
     return () => clearInterval(interval);
   }, [upcomingEvents.length]);
 
-  // Reset index if list changes drastically
   useEffect(() => {
     if (currentEventIdx >= upcomingEvents.length) {
       setCurrentEventIdx(0);
     }
   }, [upcomingEvents.length, currentEventIdx]);
-
 
   if (loading) {
     return (
@@ -162,10 +156,10 @@ function Home() {
       
       {/* 1. Welcome Card (Center/Top) */}
       <div className="home-welcome-card">
-        {/* Placeholder Logo - Replace src with your actual import or URL */}
-        <img src={DEFAULT_LOGO} alt="SDOIN Logo" className="home-logo" />
         
-        <h1>{getGreeting()}!</h1>
+        {/* NO LOGO HERE - Removed to fix error */}
+        
+        <h1 style={{ marginTop: '0' }}>{getGreeting()}!</h1>
         <p className="home-desc">
           Welcome to the <strong>SDOIN Scheduling System</strong>.<br/>
           {quote}
@@ -243,7 +237,7 @@ function Home() {
             </ul>
           )}
 
-          {/* Pagination Dots (Visual Indicator only) */}
+          {/* Pagination Dots */}
           {upcomingEvents.length > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', gap: '5px', marginTop: '15px' }}>
               {upcomingEvents.map((_, idx) => (
