@@ -30,8 +30,8 @@
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-    <div id="devtools-overlay">
-      ⚠️ DevTools detected! Content hidden.
+     <div id="devtools-overlay">
+     ⚠️ DevTools detected! Content hidden.
     </div>
 
     <script>
@@ -41,29 +41,29 @@
       document.addEventListener('contextmenu', (e) => e.preventDefault());
 
       // Disable DevTools shortcuts
-      document.addEventListener('keydown', (e) => {
-        if (
-          e.key === 'F12' || 
-          (e.ctrlKey && e.shiftKey && ['I','J'].includes(e.key)) || 
-          (e.ctrlKey && e.key === 'U')
-        ) {
-          e.preventDefault();
-          alert('DevTools shortcuts are disabled!');
-        }
-      });
+      // document.addEventListener('keydown', (e) => {
+      //  if (
+        //  e.key === 'F12' || 
+          //(e.ctrlKey && e.shiftKey && ['I','J'].includes(e.key)) || 
+          //(e.ctrlKey && e.key === 'U')
+        //) {
+          //e.preventDefault();
+          //alert('DevTools shortcuts are disabled!');
+       // }
+      //});
 
       // Detect DevTools open by window size hack
-      function detectDevTools() {
-        const widthThreshold = window.outerWidth - window.innerWidth > 100;
-        const heightThreshold = window.outerHeight - window.innerHeight > 100;
-        if (widthThreshold || heightThreshold) {
-          overlay.style.display = 'block';
-        } else {
-          overlay.style.display = 'none';
-        }
-      }
+   //   function detectDevTools() {
+     //   const widthThreshold = window.outerWidth - window.innerWidth > 100;
+       // const heightThreshold = window.outerHeight - window.innerHeight > 100;
+       // if (widthThreshold || heightThreshold) {
+       //   overlay.style.display = 'block';
+       // } else {
+        //  overlay.style.display = 'none';
+       // }
+     // }
 
-      setInterval(detectDevTools, 1000);
+    //  setInterval(detectDevTools, 1000);
     </script>
   </body>
 </html>
