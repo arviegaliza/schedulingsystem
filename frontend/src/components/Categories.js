@@ -11,6 +11,10 @@ function Categories() {
     email: '',
     department: '',
   });
+  
+  // --- NEW STATE: To toggle between lists ---
+  const [personnelType, setPersonnelType] = useState('Teaching');
+
   const [categoryList, setCategoryList] = useState([]);
   const [filterDept, setFilterDept] = useState('All');
   const [showForm, setShowForm] = useState(false);
@@ -23,22 +27,40 @@ function Categories() {
   const departments = ['OSDS', 'SGOD', 'CID'];
   const API_URL = `${process.env.REACT_APP_API_URL}/api/categories`;
 
-const fetchCategories = useCallback(async () => {
-  if (!user) return; // Wait until user is loaded
-  try {
-    setIsLoading(true);
-    const res = await axios.get(`${API_URL}?userType=${user.type}`, {
-      withCredentials: true, // include cookies/session if needed
-    });
-    setCategoryList(res.data);
-  } catch (err) {
-    console.error('Fetch error:', err);
-    toast.error(err.response?.data?.message || 'Failed to fetch categories');
-  } finally {
-    setIsLoading(false);
-  }
-}, [API_URL, user]);
+  // --- DEFINED POSITION LISTS ---
+  const teachingPositions = [
+    'Teacher I', 'Teacher II', 'Teacher III',
+    'Master Teacher I', 'Master Teacher II', 'Master Teacher III',
+    'Head Teacher I', 'Head Teacher II', 'Head Teacher III',
+    'Principal I', 'Principal II', 'Principal III', 'Principal IV',
+    'ALS Teacher', 'SpEd Teacher'
+  ];
 
+  const nonTeachingPositions = [
+    'Administrative Officer I', 'Administrative Officer II', 
+    'Administrative Officer IV', 'Administrative Officer V',
+    'Administrative Assistant I', 'Administrative Assistant II', 'Administrative Assistant III',
+    'Accountant I', 'Accountant II', 'Accountant III',
+    'Budget Officer', 'Cashier', 'Registrar', 'Librarian', 
+    'Nurse', 'Guidance Counselor', 'EPS', 'PSDS', 
+    'Utility Worker', 'Security Guard'
+  ];
+
+  const fetchCategories = useCallback(async () => {
+    if (!user) return; 
+    try {
+      setIsLoading(true);
+      const res = await axios.get(`${API_URL}?userType=${user.type}`, {
+        withCredentials: true, 
+      });
+      setCategoryList(res.data);
+    } catch (err) {
+      console.error('Fetch error:', err);
+      toast.error(err.response?.data?.message || 'Failed to fetch categories');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [API_URL, user]);
 
   // Load user from localStorage
   useEffect(() => {
@@ -61,6 +83,14 @@ const fetchCategories = useCallback(async () => {
     return () => document.body.classList.remove('no-scroll');
   }, [viewedCategory]);
 
+  // --- AUTO-UPDATE OFFICE WHEN SWITCHING TYPES (ADD MODE ONLY) ---
+  useEffect(() => {
+    if (showForm && !editMode) {
+      const firstOption = personnelType === 'Teaching' ? teachingPositions[0] : nonTeachingPositions[0];
+      setFormData(prev => ({ ...prev, office: firstOption }));
+    }
+  }, [personnelType, showForm, editMode]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -79,12 +109,16 @@ const fetchCategories = useCallback(async () => {
 
       if (res.status >= 200 && res.status < 300) {
         toast.success(editMode ? 'Category updated!' : 'Category added!');
+        
+        // Reset form
+        setPersonnelType('Teaching');
         setFormData({ 
           idnumber: '', 
-          office: '', 
+          office: teachingPositions[0], 
           email: '', 
           department: user?.type === 'Administrator' ? 'OSDS' : user?.type || '' 
         });
+        
         setShowForm(false);
         setEditMode(false);
         setEditId(null);
@@ -107,6 +141,16 @@ const fetchCategories = useCallback(async () => {
   const handleView = (cat) => setViewedCategory(cat);
 
   const handleEdit = (cat) => {
+    // Detect if the existing office is in the Teaching list
+    const isTeaching = teachingPositions.includes(cat.office);
+    
+    // Set the toggle accordingly so the dropdown shows the correct list
+    if (isTeaching) {
+        setPersonnelType('Teaching');
+    } else {
+        setPersonnelType('Non-Teaching');
+    }
+
     setFormData({
       idnumber: cat.idnumber,
       office: cat.office,
@@ -131,11 +175,7 @@ const fetchCategories = useCallback(async () => {
       }
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || '';
-      if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('already exists')) {
-        toast.error('There is a duplicate ID number.');
-      } else {
-        toast.error(msg || 'Error while deleting');
-      }
+      toast.error(msg || 'Error while deleting');
     } finally {
       setIsLoading(false);
     }
@@ -163,9 +203,10 @@ const fetchCategories = useCallback(async () => {
           onClick={() => {
             setShowForm(!showForm);
             setEditMode(false);
+            setPersonnelType('Teaching'); // Reset logic
             setFormData({ 
               idnumber: '', 
-              office: '', 
+              office: teachingPositions[0], 
               email: '', 
               department: user?.type === 'Administrator' ? 'OSDS' : user?.type || '' 
             });
@@ -190,6 +231,8 @@ const fetchCategories = useCallback(async () => {
                 ×
               </button>
               <form onSubmit={handleSubmit} className="category-form">
+                
+                {/* ID Number */}
                 <div>
                   <label>ID Number:</label>
                   <input 
@@ -200,26 +243,69 @@ const fetchCategories = useCallback(async () => {
                     disabled={isLoading}
                   />
                 </div>
+
+                {/* Personnel Type Selector */}
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display:'block', marginBottom:'5px', fontWeight:'bold', color:'#555' }}>Personnel Type:</label>
+                    <div style={{ display: 'flex', gap: '20px' }}>
+                        <label style={{ cursor: 'pointer', display:'flex', alignItems:'center', gap:'5px' }}>
+                            <input 
+                                type="radio" 
+                                name="pType" 
+                                value="Teaching" 
+                                checked={personnelType === 'Teaching'} 
+                                onChange={() => setPersonnelType('Teaching')}
+                            /> Teaching
+                        </label>
+                        <label style={{ cursor: 'pointer', display:'flex', alignItems:'center', gap:'5px' }}>
+                            <input 
+                                type="radio" 
+                                name="pType" 
+                                value="Non-Teaching" 
+                                checked={personnelType === 'Non-Teaching'} 
+                                onChange={() => setPersonnelType('Non-Teaching')}
+                            /> Non-Teaching
+                        </label>
+                    </div>
+                </div>
+
+                {/* Office / Position Dropdown */}
                 <div>
-                  <label>Office:</label>
-                  <input 
+                  <label>Position / Designation:</label>
+                  <select 
                     name="office" 
                     value={formData.office} 
                     onChange={handleChange} 
                     required 
                     disabled={isLoading}
-                  />
+                    style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', width: '100%' }}
+                  >
+                    {personnelType === 'Teaching' ? (
+                        teachingPositions.map((pos) => (
+                            <option key={pos} value={pos}>{pos}</option>
+                        ))
+                    ) : (
+                        nonTeachingPositions.map((pos) => (
+                            <option key={pos} value={pos}>{pos}</option>
+                        ))
+                    )}
+                  </select>
                 </div>
+
+                {/* Email */}
                 <div>
                   <label>Email:</label>
                   <input 
                     name="email" 
+                    type="email"
                     value={formData.email} 
                     onChange={handleChange} 
                     required 
                     disabled={isLoading}
                   />
                 </div>
+
+                {/* Department */}
                 <div>
                   <label>Department:</label>
                   {user?.type === 'Administrator' ? (
@@ -239,9 +325,11 @@ const fetchCategories = useCallback(async () => {
                       value={user?.type || formData.department}
                       readOnly
                       disabled
+                      style={{ backgroundColor: '#f0f0f0', cursor: 'not-allowed' }}
                     />
                   )}
                 </div>
+
                 <button type="submit" disabled={isLoading}>
                   {isLoading ? 'Processing...' : editMode ? 'Update' : 'Add'} Category
                 </button>
@@ -275,9 +363,9 @@ const fetchCategories = useCallback(async () => {
                   <tr>
                     <th style={{ width: '6%' }}>#</th>
                     <th style={{ width: '18%' }}>ID Number</th>
-                    <th style={{ width: '16%' }}>Office</th>
-                    <th style={{ width: '28%' }}>Email</th>
-                    <th style={{ width: '16%' }}>Department</th>
+                    <th style={{ width: '22%' }}>Position</th>
+                    <th style={{ width: '26%' }}>Email</th>
+                    <th style={{ width: '12%' }}>Dept</th>
                     <th style={{ width: '16%' }}>Actions</th>
                   </tr>
                 </thead>
@@ -289,9 +377,9 @@ const fetchCategories = useCallback(async () => {
                       <tr key={cat.id}>
                         <td style={{ width: '6%' }}>{idx + 1}</td>
                         <td style={{ width: '18%' }}>{cat.idnumber}</td>
-                        <td style={{ width: '16%' }}>{cat.office}</td>
-                        <td style={{ width: '28%' }}>{cat.email}</td>
-                        <td style={{ width: '16%' }}>{cat.department}</td>
+                        <td style={{ width: '22%' }}>{cat.office}</td>
+                        <td style={{ width: '26%' }}>{cat.email}</td>
+                        <td style={{ width: '12%' }}>{cat.department}</td>
                         <td style={{ width: '16%' }}>
                           <div className="action-buttons">
                             <button 
@@ -336,7 +424,7 @@ const fetchCategories = useCallback(async () => {
           <div className="view-content">
             <h3>Category Details</h3>
             <p><strong>ID Number:</strong> {viewedCategory.idnumber}</p>
-            <p><strong>Office:</strong> {viewedCategory.office}</p>
+            <p><strong>Position/Office:</strong> {viewedCategory.office}</p>
             <p><strong>Email:</strong> {viewedCategory.email}</p>
             <p><strong>Department:</strong> {viewedCategory.department}</p>
             <button 
