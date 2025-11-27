@@ -5,25 +5,26 @@ import 'react-toastify/dist/ReactToastify.css';
 import './Categories.css';
 
 function Categories() {
-  // UPDATED STATE: 'office' is gone, 'position' and 'personnel_type' are here
+  // --- STATE MANAGEMENT ---
   const [formData, setFormData] = useState({
     idnumber: '',
-    personnel_type: '', // Stores "Teaching" or "Non-Teaching"
-    position: '',       // Stores "Teacher I" (Renamed from office)
+    personnel_type: '', // Matches DB column
+    position: '',       // Matches DB column
     email: '',
     department: '',
   });
 
+  // Dynamic Lists (from DB)
   const [personnelTypes, setPersonnelTypes] = useState([]); 
   const [positions, setPositions] = useState({});
 
-  // ... (Settings Modal State remains same) ...
+  // Settings Modal State
   const [showSettings, setShowSettings] = useState(false);
   const [newTypeInput, setNewTypeInput] = useState('');
   const [newPosInput, setNewPosInput] = useState('');
   const [selectedTypeForSettings, setSelectedTypeForSettings] = useState('');
 
-  // Main UI State
+  // UI State
   const [categoryList, setCategoryList] = useState([]);
   const [filterDept, setFilterDept] = useState('All');
   const [showForm, setShowForm] = useState(false);
@@ -37,17 +38,24 @@ function Categories() {
   const API_URL = `${process.env.REACT_APP_API_URL}/api/categories`;
   const OPTIONS_URL = `${process.env.REACT_APP_API_URL}/api/options`;
 
-  // 1. Fetch Options
+  // --- 1. FETCH OPTIONS (Types & Positions) ---
   const fetchOptions = useCallback(async () => {
     try {
       const res = await axios.get(OPTIONS_URL);
-      setPersonnelTypes(res.data.types);
-      setPositions(res.data.positions);
-      if (res.data.types.length > 0 && !selectedTypeForSettings) {
-        setSelectedTypeForSettings(res.data.types[0]);
+      const types = res.data.types || [];
+      const pos = res.data.positions || {};
+
+      setPersonnelTypes(types);
+      setPositions(pos);
+      
+      // CRITICAL FIX: Ensure a default type is selected to prevent 400 errors
+      if (types.length > 0) {
+        setSelectedTypeForSettings(prev => prev || types[0]);
       }
-    } catch (err) { console.error("Failed to load options"); }
-  }, [OPTIONS_URL, selectedTypeForSettings]);
+    } catch (err) {
+      console.error("Failed to load options:", err);
+    }
+  }, [OPTIONS_URL]);
 
   useEffect(() => {
     const storedUser = JSON.parse(localStorage.getItem('user'));
@@ -55,53 +63,97 @@ function Categories() {
     fetchOptions();
   }, [fetchOptions]);
 
-  // 2. Fetch Categories
+  // --- 2. FETCH CATEGORIES ---
   const fetchCategories = useCallback(async () => {
     if (!user) return;
     try {
       setIsLoading(true);
       const res = await axios.get(`${API_URL}?userType=${user.type}`, { withCredentials: true });
       setCategoryList(res.data);
-    } catch (err) { toast.error('Failed to fetch categories'); }
-    finally { setIsLoading(false); }
+    } catch (err) {
+      toast.error('Failed to fetch categories');
+    } finally {
+      setIsLoading(false);
+    }
   }, [API_URL, user]);
 
-  useEffect(() => { if (user) fetchCategories(); }, [user, fetchCategories]);
+  useEffect(() => {
+    if (user) fetchCategories();
+  }, [user, fetchCategories]);
 
-  // 3. Auto-update Position when Type changes
+  // --- 3. AUTO-UPDATE POSITION (Only in Add Mode) ---
   useEffect(() => {
     if (showForm && !editMode && formData.personnel_type) {
       const availablePositions = positions[formData.personnel_type] || [];
       const firstOption = availablePositions.length > 0 ? availablePositions[0] : '';
-      setFormData(prev => ({ ...prev, position: firstOption }));
+      
+      // Only reset if current position is invalid for the new type
+      if (!availablePositions.includes(formData.position)) {
+          setFormData(prev => ({ ...prev, position: firstOption }));
+      }
     }
-  }, [formData.personnel_type, showForm, editMode, positions]);
+  }, [formData.personnel_type, showForm, editMode, positions, formData.position]);
 
-  // ... (Settings Handlers - handleAddType etc. - Keep EXACTLY as previous code) ...
-  // [Paste the HandleAddType, HandleDeleteType, HandleAddPosition, HandleDeletePosition from previous response here]
+  // --- 4. MANAGE OPTIONS (DB ACTIONS) ---
+  
   const handleAddType = async () => {
     if (!newTypeInput.trim()) return toast.warning("Enter a type name");
-    try { await axios.post(`${OPTIONS_URL}/type`, { type_name: newTypeInput }); toast.success("Type Added"); setNewTypeInput(''); fetchOptions(); } 
-    catch (err) { toast.error("Failed."); }
+    try { 
+      await axios.post(`${OPTIONS_URL}/type`, { type_name: newTypeInput }); 
+      toast.success("Type Added"); 
+      setNewTypeInput(''); 
+      fetchOptions(); 
+    } catch (err) { 
+      toast.error(err.response?.data?.error || "Failed to add type."); 
+    }
   };
+
   const handleDeleteType = async (type) => {
-    if (!window.confirm(`Delete "${type}"?`)) return;
-    try { await axios.delete(`${OPTIONS_URL}/type/${type}`); toast.success("Type Deleted"); fetchOptions(); } 
-    catch (err) { toast.error("Failed."); }
+    if (!window.confirm(`Delete "${type}"? This will delete all positions under it.`)) return;
+    try { 
+      await axios.delete(`${OPTIONS_URL}/type/${type}`); 
+      toast.success("Type Deleted"); 
+      // If we deleted the currently selected type, reset selection
+      if (selectedTypeForSettings === type) setSelectedTypeForSettings('');
+      fetchOptions(); 
+    } catch (err) { 
+      toast.error("Failed to delete."); 
+    }
   };
+
   const handleAddPosition = async () => {
-    if (!newPosInput.trim()) return toast.warning("Enter name");
-    try { await axios.post(`${OPTIONS_URL}/position`, { type_name: selectedTypeForSettings, position_name: newPosInput }); toast.success("Position Added"); setNewPosInput(''); fetchOptions(); } 
-    catch (err) { toast.error("Failed."); }
+    if (!newPosInput.trim()) return toast.warning("Enter position name");
+    
+    // FIX: Check if type is selected
+    if (!selectedTypeForSettings) return toast.error("Please select a Personnel Type first.");
+
+    try { 
+      await axios.post(`${OPTIONS_URL}/position`, { 
+        type_name: selectedTypeForSettings, 
+        position_name: newPosInput 
+      }); 
+      toast.success("Position Added"); 
+      setNewPosInput(''); 
+      fetchOptions(); 
+    } catch (err) { 
+      toast.error(err.response?.data?.error || "Failed to add position."); 
+    }
   };
+
   const handleDeletePosition = async (type, posName) => {
     if (!window.confirm(`Delete "${posName}"?`)) return;
-    try { await axios.delete(`${OPTIONS_URL}/position`, { data: { type_name: type, position_name: posName } }); toast.success("Position Deleted"); fetchOptions(); } 
-    catch (err) { toast.error("Failed."); }
+    try { 
+      await axios.delete(`${OPTIONS_URL}/position`, { 
+        data: { type_name: type, position_name: posName } 
+      }); 
+      toast.success("Position Deleted"); 
+      fetchOptions(); 
+    } catch (err) { 
+      toast.error("Failed to delete."); 
+    }
   };
 
-
-  // 4. Form Handlers
+  // --- 5. FORM ACTIONS ---
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -111,15 +163,15 @@ function Categories() {
     setShowForm(!showForm);
     setEditMode(false);
     
-    // Default logic
+    // Set defaults from loaded options
     const defaultType = personnelTypes.length > 0 ? personnelTypes[0] : '';
     const availablePositions = positions[defaultType] || [];
     const defaultPos = availablePositions.length > 0 ? availablePositions[0] : '';
     
     setFormData({ 
       idnumber: '', 
-      personnel_type: defaultType, // New Field
-      position: defaultPos,        // Renamed Field
+      personnel_type: defaultType, 
+      position: defaultPos,        
       email: '', 
       department: user?.type === 'Administrator' ? 'OSDS' : user?.type
     });
@@ -142,7 +194,7 @@ function Categories() {
       setEditMode(false);
       fetchCategories();
     } catch (err) {
-      const msg = err.response?.data?.message || '';
+      const msg = err.response?.data?.message || err.response?.data?.error || '';
       if (msg.toLowerCase().includes('duplicate')) toast.error('Error: Duplicate ID Number.');
       else toast.error(msg || 'Operation failed');
     } finally {
@@ -151,11 +203,11 @@ function Categories() {
   };
 
   const handleEdit = (cat) => {
-    // When editing, we now load personnel_type and position directly from DB data
+    // Map DB fields to state
     setFormData({
       idnumber: cat.idnumber,
-      personnel_type: cat.personnel_type, // Loaded from DB
-      position: cat.position,             // Loaded from DB
+      personnel_type: cat.personnel_type || (personnelTypes.length > 0 ? personnelTypes[0] : ''), 
+      position: cat.position, 
       email: cat.email,
       department: cat.department,
     });
@@ -178,6 +230,13 @@ function Categories() {
   const filteredList = filterDept === 'All' ? categoryList : categoryList.filter(cat => cat.department === filterDept);
   const canEditOrDelete = (cat) => (user?.type === 'Administrator' || user?.type === cat.department);
 
+  // Lock scroll when modal is open
+  useEffect(() => {
+    if (viewedCategory || showSettings || showForm) document.body.classList.add('no-scroll');
+    else document.body.classList.remove('no-scroll');
+    return () => document.body.classList.remove('no-scroll');
+  }, [viewedCategory, showSettings, showForm]);
+
   return (
     <div className="category-container">
       <ToastContainer position="top-right" autoClose={2000} hideProgressBar closeOnClick />
@@ -195,17 +254,18 @@ function Categories() {
       </div>
 
       <div className="form-and-table">
-        {/* SETTINGS MODAL (Same as before) */}
+        {/* --- SETTINGS MODAL --- */}
         {showSettings && (
           <div className="category-modal-overlay" onClick={() => setShowSettings(false)}>
             <div className="category-modal" style={{ maxWidth:'600px' }} onClick={e => e.stopPropagation()}>
                <button className="close-view-btn" style={{position:'absolute', top:10, right:10}} onClick={() => setShowSettings(false)}>×</button>
                <h3>Manage Options</h3>
                
+               {/* 1. Types */}
                <div className="settings-section" style={{marginBottom:'20px', borderBottom:'1px solid #eee', paddingBottom:'15px'}}>
                  <h4>1. Personnel Types</h4>
                  <div style={{display:'flex', gap:'5px', marginBottom:'10px'}}>
-                   <input placeholder="New Type" value={newTypeInput} onChange={(e)=>setNewTypeInput(e.target.value)} />
+                   <input placeholder="New Type (e.g. Job Order)" value={newTypeInput} onChange={(e)=>setNewTypeInput(e.target.value)} />
                    <button className="view-btn" onClick={handleAddType}>Add</button>
                  </div>
                  <div style={{display:'flex', flexWrap:'wrap', gap:'5px'}}>
@@ -217,6 +277,7 @@ function Categories() {
                  </div>
                </div>
 
+               {/* 2. Positions */}
                <div className="settings-section">
                  <h4>2. Positions</h4>
                  <label>Select Type:</label>
@@ -234,13 +295,14 @@ function Categories() {
                         <span style={{cursor:'pointer', color:'red', fontWeight:'bold'}} onClick={()=>handleDeletePosition(selectedTypeForSettings, pos)}>Delete</span>
                       </div>
                    ))}
+                   {(positions[selectedTypeForSettings] || []).length === 0 && <span style={{color:'#999', fontSize:'12px'}}>No positions found for this type.</span>}
                  </div>
                </div>
             </div>
           </div>
         )}
 
-        {/* ADD/EDIT FORM */}
+        {/* --- ADD/EDIT FORM --- */}
         {showForm && (
           <div className="category-modal-overlay" onClick={() => setShowForm(false)}>
             <div className="category-modal" onClick={e => e.stopPropagation()}>
@@ -312,7 +374,7 @@ function Categories() {
           </div>
         )}
 
-        {/* TABLE SECTION */}
+        {/* --- TABLE SECTION --- */}
         <div className="table-panel">
           <div className="filter-group">
             <label>Filter by Department:</label>

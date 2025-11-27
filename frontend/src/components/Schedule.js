@@ -65,10 +65,11 @@ function Schedule() {
       setUser(storedUser);
 
       if (storedUser?.type === 'OfficeUser') {
+        // FIX 1: Map to .position instead of .office
         setFormData(prev => ({
           ...prev,
           department: [{ label: storedUser.department, value: storedUser.department }],
-          participants: [{ label: storedUser.office, value: storedUser.office }]
+          participants: [{ label: storedUser.position, value: storedUser.position }]
         }));
       }
       document.body.style.overflow = storedUser?.type === 'OfficeUser' ? 'auto' : 'hidden';
@@ -115,7 +116,6 @@ function Schedule() {
         
         let status = 'upcoming';
 
-        // 6:01 -> Ongoing. 6:11 -> Ended.
         if (now >= start && now <= end) {
           status = 'ongoing';
         } else if (now > end) {
@@ -135,7 +135,6 @@ function Schedule() {
     try {
       const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/events`);
       const eventsWithParsedData = res.data.map(event => {
-        // Safe parsing to prevent white screen crash
         let participants = [];
         try {
           if (Array.isArray(event.participants)) participants = event.participants;
@@ -157,7 +156,6 @@ function Schedule() {
         const cleanStartDate = String(event.start_date || '').split('T')[0];
         const cleanEndDate = String(event.end_date || '').split('T')[0];
 
-        // Set initial status immediately
         const now = new Date();
         const start = getDateTime(cleanStartDate, event.start_time);
         const end = getDateTime(cleanEndDate, event.end_time);
@@ -184,7 +182,7 @@ function Schedule() {
 
   useEffect(() => {
     fetchEvents();
-    // Fetch dependencies
+    
     const loadDeps = async () => {
       try {
         const dRes = await axios.get(`${process.env.REACT_APP_API_URL}/api/department`);
@@ -199,7 +197,6 @@ function Schedule() {
     socket.on('connect', () => console.log('🟢 Connected to WebSocket'));
     socket.on('statusUpdated', () => fetchEvents());
 
-    // UPDATED: Check every 5 seconds for instant hiding
     const interval = setInterval(updateEventStatuses, 5000); 
     return () => {
       socket.disconnect();
@@ -224,8 +221,9 @@ function Schedule() {
     setIsSubmitting(true);
 
     try {
+      // FIX 2: Use user.position here too
       const payloadParticipants = user?.type === 'OfficeUser'
-        ? [user.office]
+        ? [user.position]
         : formData.participants.map(p => p.value);
 
       const payloadDepartments = user?.type === 'OfficeUser'
@@ -294,7 +292,8 @@ function Schedule() {
   const canEditEvent = (event) => {
     if (user?.type === 'Administrator') return true;
     if (user?.type === 'OfficeUser') {
-      return event.participants && event.participants.includes(user.office);
+      // FIX 3: Check against user.position
+      return event.participants && event.participants.includes(user.position);
     }
     return event.department && event.department.includes(user?.type);
   };
@@ -302,7 +301,8 @@ function Schedule() {
   const canDeleteEvent = (event) => {
     if (user?.type === 'Administrator') return true;
     if (user?.type === 'OfficeUser') {
-      return event.participants && event.participants.includes(user.office);
+      // FIX 4: Check against user.position
+      return event.participants && event.participants.includes(user.position);
     }
     return event.department && event.department.includes(user?.type);
   };
@@ -328,11 +328,12 @@ function Schedule() {
     formData.department.some(d => d.value === cat.department.trim())
   );
 
+  // FIX 5: Map 'cat.position' instead of 'cat.office' for the dropdown
   const participantOptions = filteredCategories
-    .map(cat => ({ label: cat.office, value: cat.office }));
+    .map(cat => ({ label: cat.position, value: cat.position }));
 
 
-  // --- HANDLERS FOR TOOLTIP (MOVED UP) ---
+  // --- HANDLERS FOR TOOLTIP ---
   const handleDayMouseEnter = (tileDate, events, e) => {
     setHoveredDay(tileDate.toDateString());
     setHoveredEvents(events);
@@ -349,9 +350,7 @@ function Schedule() {
     if (view === 'month') {
       const tileDateOnly = toLocalDateOnly(tileDate);
       const matches = events.filter(event => {
-        // HIDE if ended
         if (event.status === 'ended') return false; 
-
         if (!event.start_date_only || !event.end_date_only) return false;
         
         const isMatchDate = tileDateOnly >= event.start_date_only && tileDateOnly <= event.end_date_only;
@@ -365,7 +364,6 @@ function Schedule() {
       return (
         <div
           className="calendar-tile-content"
-          // --- CONNECTED HANDLERS HERE ---
           onMouseEnter={(e) => handleDayMouseEnter(tileDate, matches, e)}
           onMouseMove={(e) => setTooltipPos({ x: e.clientX, y: e.clientY })}
           onMouseLeave={handleDayMouseLeave}
@@ -381,11 +379,8 @@ function Schedule() {
     return null;
   };
 
-  // --- UPDATED LOGIC: Table Filter ---
   const eventsForSelectedDate = events.filter((event) => {
-    // HIDE if ended
     if (event.status === 'ended') return false;
-
     if (!event.start_date_only || !event.end_date_only) return false;
     const selectedDateOnly = toLocalDateOnly(date);
     const matchesDate = (selectedDateOnly >= event.start_date_only && selectedDateOnly <= event.end_date_only);
@@ -397,7 +392,8 @@ function Schedule() {
     <div className="schedule-container">
       {user?.type === 'OfficeUser' && (
         <div style={{ textAlign: 'right', fontWeight: 'bold', marginBottom: '10px' }}>
-          Officer: {user?.office}
+          {/* FIX 6: Display Position */}
+          Officer: {user?.position}
         </div>
       )}
       <div className="schedule-header logout-relative">
@@ -427,7 +423,8 @@ function Schedule() {
               end_time: '',
               purpose: '',
               department: [{ label: user.department, value: user.department }],
-              participants: [{ label: user.office, value: user.office }]
+              // FIX 7: Use user.position for OfficeUser default
+              participants: [{ label: user.position, value: user.position }]
             });
           } else {
             resetForm();
@@ -556,8 +553,9 @@ function Schedule() {
                     <input type="text" value={user.department} disabled />
                   </div>
                   <div className="form-col">
-                    <label>Office</label>
-                    <input type="text" value={user.office} disabled />
+                    {/* FIX 8: Label Position and use user.position */}
+                    <label>Position</label>
+                    <input type="text" value={user.position} disabled />
                   </div>
                 </>
               )}
